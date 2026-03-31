@@ -7,7 +7,9 @@
         "data": {
           "username": "Email",
           "password": "Password",
-          "region": "Region"
+          "region": "Region",
+          "host": "Mock server host (leave empty for real cloud)",
+          "port": "Mock server port"
         }
       }
     },

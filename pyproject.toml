@@ -1,0 +1,33 @@
+[project]
+name = "ha-dreame-cloud"
+version = "0.1.0"
+description = "Dreame Cloud HACS integration for Home Assistant"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "homeassistant>=2025.1.0",
+    "dreame-mocker @ git+ssh://git@github-personal/genericJE/dreame-mocker.git",
+    "Pillow>=10.0.0",
+    "numpy>=1.26.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["custom_components/dreame_cloud"]
+
+[tool.uv]
+dev-dependencies = [
+    "pyright>=1.1.400",
+]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.13"
+include = ["custom_components"]
+# HA base classes mix property/cached_property — unfixable from integration side
+reportIncompatibleVariableOverride = false

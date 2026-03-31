@@ -8,9 +8,9 @@ from typing import Any
 
 from homeassistant.components.vacuum import (
     StateVacuumEntity,
-    VacuumActivity,
     VacuumEntityFeature,
 )
+from homeassistant.components.vacuum.const import VacuumActivity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -101,22 +101,16 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
     @property
     def activity(self) -> VacuumActivity | None:
         """Return the current vacuum activity."""
-        if self.coordinator.data is None:
-            return None
         return STATE_MAP.get(self.coordinator.data.status.state)
 
     @property
     def battery_level(self) -> int | None:
         """Return the battery level."""
-        if self.coordinator.data is None:
-            return None
         return self.coordinator.data.status.battery
 
     @property
     def fan_speed(self) -> str | None:
         """Return the current fan speed."""
-        if self.coordinator.data is None:
-            return None
         return SUCTION_TO_FAN_SPEED.get(
             self.coordinator.data.status.suction_level
         )
@@ -195,10 +189,8 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         await self.coordinator.async_request_refresh()
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
-        if self.coordinator.data is None:
-            return None
         status = self.coordinator.data.status
         attrs: dict[str, Any] = {
             "state_name": status.state_name,

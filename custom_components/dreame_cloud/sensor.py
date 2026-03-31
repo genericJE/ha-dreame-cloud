@@ -109,9 +109,6 @@ class DreameCloudSensor(DreameCloudEntity, SensorEntity):
     @property
     def native_value(self) -> int | str | None:
         """Return the sensor value."""
-        if self.coordinator.data is None:
-            return None
-
         status = self.coordinator.data.status
         key = self.entity_description.key
 

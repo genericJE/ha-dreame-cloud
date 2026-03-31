@@ -1,0 +1,25 @@
+services:
+  mock:
+    build:
+      context: ../../dreame-mocker
+      dockerfile: ../ha-dreame-cloud/dev/Dockerfile.mock
+    ports:
+      - "13267:13267"
+      - "19973:19973"
+
+  homeassistant:
+    build:
+      context: ..
+      dockerfile: dev/Dockerfile.ha
+      additional_contexts:
+        dreame-mocker: ../../dreame-mocker
+    volumes:
+      - ha-config:/config
+      - ../custom_components:/config/custom_components:ro
+    ports:
+      - "8123:8123"
+    depends_on:
+      - mock
+
+volumes:
+  ha-config:

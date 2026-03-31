@@ -16,7 +16,10 @@ PLATFORMS = [
 ]
 
 CONF_REGION = "region"
+CONF_HOST = "host"
+CONF_PORT = "port"
 DEFAULT_REGION = "eu"
+DEFAULT_PORT = 13267
 DEFAULT_SCAN_INTERVAL = 30  # seconds
 MAP_UPDATE_INTERVAL_CLEANING = 5  # seconds
 MAP_UPDATE_INTERVAL_IDLE = 300  # seconds (5 minutes)

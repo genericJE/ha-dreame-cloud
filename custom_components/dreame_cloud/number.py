@@ -38,10 +38,8 @@ class DreameCloudVolumeNumber(DreameCloudEntity, NumberEntity):
         self._attr_unique_id = f"{coordinator.device_id}_volume"
 
     @property
-    def native_value(self) -> float | None:
+    def native_value(self) -> float:
         """Return the current volume."""
-        if self.coordinator.data is None:
-            return None
         return float(self.coordinator.data.volume)
 
     async def async_set_native_value(self, value: float) -> None:

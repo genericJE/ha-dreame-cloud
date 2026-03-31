@@ -34,10 +34,8 @@ class DreameCloudDNDSwitch(DreameCloudEntity, SwitchEntity):
         self._attr_unique_id = f"{coordinator.device_id}_dnd"
 
     @property
-    def is_on(self) -> bool | None:
+    def is_on(self) -> bool:
         """Return true if DND is enabled."""
-        if self.coordinator.data is None:
-            return None
         return self.coordinator.data.dnd_enabled
 
     async def async_turn_on(self, **kwargs: Any) -> None:

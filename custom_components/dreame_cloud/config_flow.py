@@ -12,7 +12,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
 from dreame_mocker.client import AuthenticationError, DreameCloud, DreameError
 
-from .const import CONF_REGION, DEFAULT_REGION, DOMAIN
+from .const import CONF_HOST, CONF_PORT, CONF_REGION, DEFAULT_PORT, DEFAULT_REGION, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +23,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_REGION, default=DEFAULT_REGION): vol.In(
             ["eu", "us", "cn"]
         ),
+        vol.Optional(CONF_HOST): str,
+        vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
     }
 )
 
@@ -39,11 +41,16 @@ class DreameCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            host: str | None = user_input.get(CONF_HOST) or None
+            port: int = user_input.get(CONF_PORT, DEFAULT_PORT)
+
             try:
                 cloud = DreameCloud(
                     username=user_input[CONF_USERNAME],
                     password=user_input[CONF_PASSWORD],
                     region=user_input.get(CONF_REGION, DEFAULT_REGION),
+                    host=host,
+                    port=port,
                 )
                 async with cloud:
                     await cloud.connect()

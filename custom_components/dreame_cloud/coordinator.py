@@ -20,7 +20,7 @@ from dreame_mocker.client import (
     DreameMap,
 )
 
-from .const import DEFAULT_SCAN_INTERVAL, MAP_UPDATE_INTERVAL_CLEANING, MAP_UPDATE_INTERVAL_IDLE
+from .const import DEFAULT_PORT, DEFAULT_SCAN_INTERVAL, MAP_UPDATE_INTERVAL_CLEANING, MAP_UPDATE_INTERVAL_IDLE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class DreameCloudData:
 
     status: DeviceStatus
     map_data: DreameMap | None = None
-    consumables: dict[str, int] = field(default_factory=dict)
+    consumables: dict[str, int] = field(default_factory=lambda: dict[str, int]())
     dnd_enabled: bool = False
     volume: int = 50
 
@@ -45,6 +45,8 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         username: str,
         password: str,
         region: str,
+        host: str | None = None,
+        port: int = DEFAULT_PORT,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -57,6 +59,8 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             username=username,
             password=password,
             region=region,
+            host=host,
+            port=port,
         )
         self._device: DreameDevice | None = None
         self._map_data: DreameMap | None = None

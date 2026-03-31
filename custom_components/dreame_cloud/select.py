@@ -52,8 +52,6 @@ class DreameCloudSuctionSelect(DreameCloudEntity, SelectEntity):
     @property
     def current_option(self) -> str | None:
         """Return the current suction level."""
-        if self.coordinator.data is None:
-            return None
         return SUCTION_TO_FAN_SPEED.get(
             self.coordinator.data.status.suction_level
         )
@@ -82,8 +80,6 @@ class DreameCloudWaterVolumeSelect(DreameCloudEntity, SelectEntity):
     @property
     def current_option(self) -> str | None:
         """Return the current water volume."""
-        if self.coordinator.data is None:
-            return None
         return INT_TO_WATER_VOLUME.get(
             self.coordinator.data.status.water_volume
         )
@@ -112,8 +108,6 @@ class DreameCloudCleaningModeSelect(DreameCloudEntity, SelectEntity):
     @property
     def current_option(self) -> str | None:
         """Return the current cleaning mode."""
-        if self.coordinator.data is None:
-            return None
         return INT_TO_CLEANING_MODE.get(
             self.coordinator.data.status.cleaning_mode
         )

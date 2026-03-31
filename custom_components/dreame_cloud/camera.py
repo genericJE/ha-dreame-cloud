@@ -134,7 +134,7 @@ def _render_map(map_data: DreameMap) -> bytes:
     # Scale up for better visibility
     scale = max(1, 800 // max(w, h))
     if scale > 1:
-        img = img.resize((w * scale, h * scale), Image.NEAREST)
+        img = img.resize((w * scale, h * scale), Image.Resampling.NEAREST)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

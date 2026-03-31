@@ -37,9 +37,7 @@ class DreameCloudChargingSensor(DreameCloudEntity, BinarySensorEntity):
         self._attr_unique_id = f"{coordinator.device_id}_charging"
 
     @property
-    def is_on(self) -> bool | None:
+    def is_on(self) -> bool:
         """Return true if charging."""
-        if self.coordinator.data is None:
-            return None
         # State 6 = Charging, 13 = Charge Complete
         return self.coordinator.data.status.state in (6, 13)
