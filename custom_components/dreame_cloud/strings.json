@@ -1,0 +1,99 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Dreame Cloud",
+        "description": "Enter your Dreame account credentials. Use the password you set in the Dreame app (Settings > Account & Security > Password).",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "region": "Region"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials. Make sure you have set a password in the Dreame app.",
+      "cannot_connect": "Cannot connect to Dreame Cloud.",
+      "no_devices": "No devices found on this account.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This account is already configured."
+    }
+  },
+  "entity": {
+    "vacuum": {
+      "vacuum": {
+        "name": "Vacuum"
+      }
+    },
+    "camera": {
+      "map": {
+        "name": "Map"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "cleaning_time": {
+        "name": "Cleaning Time"
+      },
+      "cleaning_area": {
+        "name": "Cleaning Area"
+      },
+      "device_state": {
+        "name": "State"
+      },
+      "main_brush_life": {
+        "name": "Main Brush Life"
+      },
+      "side_brush_life": {
+        "name": "Side Brush Life"
+      },
+      "filter_life": {
+        "name": "Filter Life"
+      },
+      "mop_pad_life": {
+        "name": "Mop Pad Life"
+      }
+    },
+    "binary_sensor": {
+      "charging": {
+        "name": "Charging"
+      }
+    },
+    "switch": {
+      "dnd": {
+        "name": "Do Not Disturb"
+      }
+    },
+    "button": {
+      "mop_wash": {
+        "name": "Start Mop Wash"
+      },
+      "mop_dry": {
+        "name": "Start Mop Dry"
+      },
+      "dust_collection": {
+        "name": "Start Dust Collection"
+      }
+    },
+    "number": {
+      "volume": {
+        "name": "Volume"
+      }
+    },
+    "select": {
+      "suction_level": {
+        "name": "Suction Level"
+      },
+      "water_volume": {
+        "name": "Water Volume"
+      },
+      "cleaning_mode": {
+        "name": "Cleaning Mode"
+      }
+    }
+  }
+}

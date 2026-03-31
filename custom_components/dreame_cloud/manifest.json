@@ -1,0 +1,16 @@
+{
+  "domain": "dreame_cloud",
+  "name": "Dreame Cloud",
+  "codeowners": ["@genericJE"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/genericJE/ha-dreame-cloud",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/genericJE/ha-dreame-cloud/issues",
+  "requirements": [
+    "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git",
+    "Pillow>=10.0.0",
+    "numpy>=1.26.0"
+  ],
+  "version": "0.1.0"
+}
