@@ -1,4 +1,4 @@
-"""Binary sensor platform for Dreame Cloud."""
+"""Binary sensor platform for Dreame Cloud Vacuum."""
 
 from __future__ import annotations
 

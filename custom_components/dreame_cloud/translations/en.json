@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to Dreame Cloud",
+        "title": "Connect to Dreame Cloud Vacuum",
         "description": "Enter your Dreame account credentials. Use the password you set in the Dreame app (Settings > Account & Security > Password).",
         "data": {
           "username": "Email",
@@ -15,7 +15,7 @@
     },
     "error": {
       "invalid_auth": "Invalid credentials. Make sure you have set a password in the Dreame app.",
-      "cannot_connect": "Cannot connect to Dreame Cloud.",
+      "cannot_connect": "Cannot connect to Dreame cloud.",
       "no_devices": "No devices found on this account.",
       "unknown": "An unexpected error occurred."
     },

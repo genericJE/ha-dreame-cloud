@@ -1,4 +1,4 @@
-"""Camera platform for Dreame Cloud map."""
+"""Camera platform for Dreame Cloud Vacuum map."""
 
 from __future__ import annotations
 

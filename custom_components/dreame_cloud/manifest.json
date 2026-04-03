@@ -1,6 +1,6 @@
 {
   "domain": "dreame_cloud",
-  "name": "Dreame Cloud",
+  "name": "Dreame Cloud Vacuum",
   "codeowners": ["@genericJE"],
   "config_flow": true,
   "dependencies": [],

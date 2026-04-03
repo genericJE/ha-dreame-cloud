@@ -1,4 +1,4 @@
-"""Dreame Cloud integration for Home Assistant."""
+"""Dreame Cloud Vacuum integration for Home Assistant."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ type DreameCloudConfigEntry = ConfigEntry[DreameCloudCoordinator]
 async def async_setup_entry(
     hass: HomeAssistant, entry: DreameCloudConfigEntry
 ) -> bool:
-    """Set up Dreame Cloud from a config entry."""
+    """Set up Dreame Cloud Vacuum from a config entry."""
     coordinator = DreameCloudCoordinator(
         hass,
         username=entry.data[CONF_USERNAME],

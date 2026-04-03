@@ -1,4 +1,4 @@
-"""Sensor platform for Dreame Cloud."""
+"""Sensor platform for Dreame Cloud Vacuum."""
 
 from __future__ import annotations
 

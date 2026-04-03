@@ -1,4 +1,4 @@
-"""Base entity for Dreame Cloud."""
+"""Base entity for Dreame Cloud Vacuum."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .coordinator import DreameCloudCoordinator
 
 
 class DreameCloudEntity(CoordinatorEntity[DreameCloudCoordinator]):
-    """Base entity for Dreame Cloud."""
+    """Base entity for Dreame Cloud Vacuum."""
 
     _attr_has_entity_name = True
 

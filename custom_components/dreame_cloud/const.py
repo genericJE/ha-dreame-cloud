@@ -1,4 +1,4 @@
-"""Constants for the Dreame Cloud integration."""
+"""Constants for the Dreame Cloud Vacuum integration."""
 
 from homeassistant.const import Platform
 

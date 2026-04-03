@@ -1,4 +1,4 @@
-"""Select platform for Dreame Cloud."""
+"""Select platform for Dreame Cloud Vacuum."""
 
 from __future__ import annotations
 

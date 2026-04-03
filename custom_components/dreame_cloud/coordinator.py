@@ -1,4 +1,4 @@
-"""Data update coordinator for Dreame Cloud."""
+"""Data update coordinator for Dreame Cloud Vacuum."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class DreameCloudData:
-    """Data from the Dreame Cloud API."""
+    """Data from the Dreame cloud API."""
 
     status: DeviceStatus
     map_data: DreameMap | None = None
@@ -39,7 +39,7 @@ class DreameCloudData:
 
 
 class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
-    """Coordinate data updates from Dreame Cloud."""
+    """Coordinate data updates from Dreame cloud."""
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         super().__init__(
             hass,
             _LOGGER,
-            name="Dreame Cloud",
+            name="Dreame Cloud Vacuum",
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
         self._cloud = DreameCloud(
