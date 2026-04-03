@@ -165,6 +165,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             self._connected = False
             raise UpdateFailed(f"Authentication failed: {err}") from err
         except DreameError as err:
+            self._connected = False
             raise UpdateFailed(f"Update failed: {err}") from err
 
     async def async_disconnect(self) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import CONF_HOST, CONF_PORT, CONF_REGION, DEFAULT_PORT, PLATFORMS
 from .coordinator import DreameCloudCoordinator
@@ -38,3 +39,12 @@ async def async_unload_entry(
     if unload_ok:
         await entry.runtime_data.async_disconnect()
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: DreameCloudConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Allow removal of orphaned devices."""
+    return True
