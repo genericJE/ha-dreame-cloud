@@ -1,0 +1,1 @@
+../custom_components/dreame_cloud/www/dreame-vacuum-map-card.js

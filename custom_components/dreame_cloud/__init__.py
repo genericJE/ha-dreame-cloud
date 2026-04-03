@@ -2,21 +2,37 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from .const import CONF_HOST, CONF_PORT, CONF_REGION, DEFAULT_PORT, PLATFORMS
+from .const import CONF_HOST, CONF_PORT, CONF_REGION, DEFAULT_PORT, DOMAIN, PLATFORMS
 from .coordinator import DreameCloudCoordinator
 
+_LOGGER = logging.getLogger(__name__)
+
 type DreameCloudConfigEntry = ConfigEntry[DreameCloudCoordinator]
+
+CARD_URL = f"/{DOMAIN}/dreame-vacuum-map-card.js"
+CARD_PATH = str(Path(__file__).parent / "www" / "dreame-vacuum-map-card.js")
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: DreameCloudConfigEntry
 ) -> bool:
     """Set up Dreame Cloud Vacuum from a config entry."""
+    if not hass.data.get(f"{DOMAIN}_card_registered"):
+        from homeassistant.components.http import StaticPathConfig
+
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_URL, CARD_PATH, cache_headers=False)]
+        )
+        hass.data[f"{DOMAIN}_card_registered"] = True
+
     coordinator = DreameCloudCoordinator(
         hass,
         username=entry.data[CONF_USERNAME],

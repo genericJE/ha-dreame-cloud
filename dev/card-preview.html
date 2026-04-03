@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dreame Vacuum Map Card Preview</title>
+  <style>
+    body { margin: 0; padding: 20px; background: #1a1a2e; font-family: system-ui, sans-serif; }
+    .container { max-width: 500px; margin: 0 auto; }
+    ha-card { display: block; background: var(--ha-card-background, #fff); border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+
+    /* Theme variables */
+    :root {
+      --ha-card-background: #ffffff;
+      --card-background-color: #ffffff;
+      --primary-text-color: #1a1a1a;
+      --secondary-text-color: #6e6e73;
+      --primary-color: #007aff;
+      --secondary-background-color: #f5f5f7;
+      --divider-color: rgba(0,0,0,0.08);
+      --success-color: #4caf50;
+      --error-color: #f44336;
+      --ha-card-border-radius: 12px;
+    }
+
+    /* Connection UI */
+    #connect-panel {
+      background: #2a2a3e;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      color: white;
+    }
+    #connect-panel h3 { margin: 0 0 12px; font-size: 16px; }
+    #connect-panel .field { margin-bottom: 10px; }
+    #connect-panel label { display: block; font-size: 13px; color: #aaa; margin-bottom: 4px; }
+    #connect-panel input { width: 100%; padding: 8px 10px; border: 1px solid #444; border-radius: 6px; background: #1a1a2e; color: white; font-size: 14px; box-sizing: border-box; }
+    #connect-panel button { padding: 10px 20px; background: #007aff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; }
+    #connect-panel button:hover { background: #0066dd; }
+    #connect-panel .status { font-size: 13px; margin-top: 8px; }
+    #connect-panel .status.ok { color: #4caf50; }
+    #connect-panel .status.err { color: #f44336; }
+    .mode-switch { display: flex; gap: 8px; margin-bottom: 12px; }
+    .mode-switch button { flex: 1; padding: 8px; border: 1px solid #444; background: none; color: #aaa; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .mode-switch button.active { background: #007aff; color: white; border-color: #007aff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="connect-panel">
+      <h3>Data Source</h3>
+      <div class="mode-switch">
+        <button id="mode-live" class="active" onclick="setMode('live')">Live HA</button>
+        <button id="mode-mock" onclick="setMode('mock')">Mock Data</button>
+      </div>
+      <div id="live-fields">
+        <div class="field">
+          <label>HA URL</label>
+          <input id="ha-url" type="text" value="http://192.168.178.88:8123" placeholder="http://homeassistant.local:8123" />
+        </div>
+        <div class="field">
+          <label>Long-lived Access Token</label>
+          <input id="ha-token" type="password" placeholder="eyJ..." />
+        </div>
+        <button onclick="connectHA()">Connect</button>
+        <div id="conn-status" class="status"></div>
+      </div>
+    </div>
+    <div id="card-container"></div>
+  </div>
+
+  <!-- Mock ha-icon as simple text -->
+  <script>
+    if (!customElements.get('ha-icon')) {
+      class HaIcon extends HTMLElement {
+        constructor() { super(); }
+        connectedCallback() {
+          const icon = this.getAttribute('icon') || '';
+          const name = icon.replace('mdi:', '');
+          const iconMap = {
+            'battery': '\u{1F50B}', 'battery-90': '\u{1F50B}', 'battery-80': '\u{1F50B}',
+            'battery-70': '\u{1F50B}', 'battery-60': '\u{1F50B}', 'battery-50': '\u{1F50B}',
+            'battery-40': '\u{1F50B}', 'battery-30': '\u{1F50B}', 'battery-20': '\u{1F50B}',
+            'battery-10': '\u{1F50B}', 'battery-alert': '\u26A0',
+            'cog': '\u2699', 'close': '\u2715', 'play': '\u25B6', 'pause': '\u23F8',
+            'stop': '\u23F9', 'home': '\u{1F3E0}', 'clock-outline': '\u{1F552}',
+            'texture-box': '\u25A1', 'map': '\u{1F5FA}', 'format-list-bulleted': '\u2630',
+            'brush': '\u{1F58C}', 'air-filter': '\u{1F4A8}', 'square-rounded': '\u25A0',
+            'volume-low': '\u{1F509}', 'volume-high': '\u{1F50A}', 'water': '\u{1F4A7}',
+            'fan': '\u{1F4A8}', 'delete-variant': '\u{1F5D1}',
+            'minus-circle': '\u{1F6AB}', 'water-sync': '\u{1F4A7}', 'delete-empty': '\u{1F5D1}',
+          };
+          this.textContent = iconMap[name] || '\u25CF';
+          this.style.cssText = `display:inline-flex;align-items:center;justify-content:center;width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px);font-size:var(--mdc-icon-size,16px);`;
+        }
+      }
+      customElements.define('ha-icon', HaIcon);
+    }
+  </script>
+
+  <script src="dreame-vacuum-map-card.js"></script>
+
+  <script>
+    let currentMode = 'live';
+    let card = null;
+    let pollInterval = null;
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('mode-live').classList.toggle('active', mode === 'live');
+      document.getElementById('mode-mock').classList.toggle('active', mode === 'mock');
+      document.getElementById('live-fields').style.display = mode === 'live' ? 'block' : 'none';
+
+      if (mode === 'mock') {
+        if (pollInterval) clearInterval(pollInterval);
+        loadMock();
+      }
+    }
+
+    // ── Live HA connection ──
+    async function connectHA() {
+      const url = document.getElementById('ha-url').value.replace(/\/$/, '');
+      const token = document.getElementById('ha-token').value;
+      const status = document.getElementById('conn-status');
+
+      status.textContent = 'Connecting...';
+      status.className = 'status';
+
+      try {
+        const resp = await fetch(`${url}/api/states`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const entities = await resp.json();
+
+        status.textContent = `Connected. ${entities.length} entities loaded.`;
+        status.className = 'status ok';
+
+        // Build hass object from live data
+        const states = {};
+        for (const e of entities) {
+          states[e.entity_id] = e;
+        }
+
+        const liveHass = {
+          states,
+          callService: async (domain, service, data) => {
+            console.log(`[Live] callService: ${domain}.${service}`, data);
+            try {
+              await fetch(`${url}/api/services/${domain}/${service}`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+              });
+              // Refresh states after service call
+              setTimeout(() => refreshStates(url, token), 1000);
+            } catch (err) {
+              console.error('Service call failed:', err);
+            }
+          },
+          themes: { darkMode: false },
+        };
+
+        // Fix camera entity_picture to use full URL
+        for (const [id, entity] of Object.entries(states)) {
+          if (id.startsWith('camera.') && entity.attributes.entity_picture) {
+            const pic = entity.attributes.entity_picture;
+            if (pic.startsWith('/')) {
+              entity.attributes.entity_picture = `${url}${pic}`;
+            }
+          }
+        }
+
+        initCard(liveHass);
+
+        // Poll for updates every 5 seconds
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(() => refreshStates(url, token), 5000);
+
+      } catch (err) {
+        status.textContent = `Failed: ${err.message}`;
+        status.className = 'status err';
+      }
+    }
+
+    async function refreshStates(url, token) {
+      try {
+        const resp = await fetch(`${url}/api/states`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!resp.ok) return;
+        const entities = await resp.json();
+        const states = {};
+        for (const e of entities) {
+          states[e.entity_id] = e;
+          // Fix camera entity_picture
+          if (e.entity_id.startsWith('camera.') && e.attributes.entity_picture) {
+            const pic = e.attributes.entity_picture;
+            if (pic.startsWith('/')) {
+              e.attributes.entity_picture = `${url}${pic}`;
+            }
+          }
+        }
+        if (card) {
+          card.hass = {
+            ...card._hass,
+            states,
+          };
+        }
+      } catch (err) {
+        // Silently fail on refresh
+      }
+    }
+
+    // ── Mock data ──
+    function generateMockMapDataURL() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 732;
+      canvas.height = 428;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#202020';
+      ctx.fillRect(0, 0, 732, 428);
+      const rooms = [
+        { x: 200, y: 0, w: 200, h: 324, color: 'rgb(255,218,185)' },
+        { x: 412, y: 16, w: 312, h: 404, color: 'rgb(245,222,179)' },
+        { x: 456, y: 36, w: 264, h: 228, color: 'rgb(255,228,196)' },
+        { x: 4, y: 28, w: 112, h: 384, color: 'rgb(173,216,230)' },
+        { x: 116, y: 328, w: 308, h: 88, color: 'rgb(255,228,225)' },
+      ];
+      rooms.forEach(r => {
+        ctx.fillStyle = r.color;
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+      });
+      ctx.strokeStyle = '#505050';
+      ctx.lineWidth = 4;
+      rooms.forEach(r => ctx.strokeRect(r.x, r.y, r.w, r.h));
+      return canvas.toDataURL('image/png');
+    }
+
+    function loadMock() {
+      const mockHass = {
+        states: {
+          'vacuum.x50_ultra_complete_vacuum': {
+            entity_id: 'vacuum.x50_ultra_complete_vacuum',
+            state: 'docked',
+            attributes: {
+              friendly_name: 'X50 Ultra Complete Vacuum',
+              fan_speed: 'Standard',
+              fan_speed_list: ['Quiet', 'Standard', 'Strong', 'Turbo'],
+              supported_features: 12604,
+            },
+          },
+          'camera.x50_ultra_complete_map': {
+            entity_id: 'camera.x50_ultra_complete_map',
+            state: 'idle',
+            attributes: {
+              friendly_name: 'X50 Ultra Complete Map',
+              entity_picture: generateMockMapDataURL(),
+              map_width: 732, map_height: 428,
+              scale: 4, rotation: 90, flip_x: false, flip_y: true,
+              pixel_size: 50, map_left: -3750, map_top: -6100,
+              raw_width: 107, raw_height: 183,
+              robot_position: { x: 350, y: 200 },
+              charger_position: { x: 60, y: 380 },
+              rooms: {
+                '4': { name: 'Living Room', segment_id: 4, color: [255,218,185], x: 200, y: 0, w: 200, h: 324, center_x: 300, center_y: 162 },
+                '8': { name: 'Bedroom', segment_id: 8, color: [245,222,179], x: 412, y: 16, w: 312, h: 404, center_x: 568, center_y: 218 },
+                '11': { name: 'Kitchen', segment_id: 11, color: [255,228,196], x: 456, y: 36, w: 264, h: 228, center_x: 588, center_y: 150 },
+                '12': { name: 'Hallway', segment_id: 12, color: [173,216,230], x: 4, y: 28, w: 112, h: 384, center_x: 60, center_y: 220 },
+                '16': { name: 'Bathroom', segment_id: 16, color: [255,228,225], x: 116, y: 328, w: 308, h: 88, center_x: 270, center_y: 372 },
+              },
+            },
+          },
+          'sensor.x50_ultra_complete_battery': { entity_id: 'sensor.x50_ultra_complete_battery', state: '87', attributes: {} },
+          'sensor.x50_ultra_complete_cleaning_time': { entity_id: 'sensor.x50_ultra_complete_cleaning_time', state: '0', attributes: {} },
+          'sensor.x50_ultra_complete_cleaning_area': { entity_id: 'sensor.x50_ultra_complete_cleaning_area', state: '0', attributes: {} },
+          'sensor.x50_ultra_complete_state': { entity_id: 'sensor.x50_ultra_complete_state', state: 'Docked', attributes: {} },
+          'select.x50_ultra_complete_cleaning_mode': { entity_id: 'select.x50_ultra_complete_cleaning_mode', state: 'Sweep & Mop', attributes: { options: ['Sweeping','Mopping','Sweep & Mop'] } },
+          'select.x50_ultra_complete_water_volume': { entity_id: 'select.x50_ultra_complete_water_volume', state: 'Medium', attributes: { options: ['Low','Medium','High'] } },
+          'select.x50_ultra_complete_suction_level': { entity_id: 'select.x50_ultra_complete_suction_level', state: 'Standard', attributes: { options: ['Quiet','Standard','Strong','Turbo'] } },
+          'switch.x50_ultra_complete_do_not_disturb': { entity_id: 'switch.x50_ultra_complete_do_not_disturb', state: 'off', attributes: {} },
+          'number.x50_ultra_complete_volume': { entity_id: 'number.x50_ultra_complete_volume', state: '50', attributes: {} },
+          'sensor.x50_ultra_complete_main_brush_life': { entity_id: 'sensor.x50_ultra_complete_main_brush_life', state: '72', attributes: {} },
+          'sensor.x50_ultra_complete_side_brush_life': { entity_id: 'sensor.x50_ultra_complete_side_brush_life', state: '85', attributes: {} },
+          'sensor.x50_ultra_complete_filter_life': { entity_id: 'sensor.x50_ultra_complete_filter_life', state: '45', attributes: {} },
+          'sensor.x50_ultra_complete_mop_pad_life': { entity_id: 'sensor.x50_ultra_complete_mop_pad_life', state: '15', attributes: {} },
+          'button.x50_ultra_complete_start_mop_wash': { entity_id: 'button.x50_ultra_complete_start_mop_wash', state: 'unknown', attributes: {} },
+          'button.x50_ultra_complete_start_mop_dry': { entity_id: 'button.x50_ultra_complete_start_mop_dry', state: 'unknown', attributes: {} },
+          'button.x50_ultra_complete_start_dust_collection': { entity_id: 'button.x50_ultra_complete_start_dust_collection', state: 'unknown', attributes: {} },
+        },
+        callService: (domain, service, data) => {
+          console.log(`[Mock] callService: ${domain}.${service}`, data);
+        },
+        themes: { darkMode: false },
+      };
+
+      initCard(mockHass);
+    }
+
+    function initCard(hass) {
+      const container = document.getElementById('card-container');
+      container.innerHTML = '';
+      card = document.createElement('dreame-vacuum-map-card');
+      card.setConfig({ entity: 'vacuum.x50_ultra_complete_vacuum' });
+      container.appendChild(card);
+      card.hass = hass;
+    }
+
+    // Auto-load mock on start
+    loadMock();
+  </script>
+</body>
+</html>

@@ -79,6 +79,28 @@ async def async_setup_entry(
         },
         "async_clean_segment",
     )
+    platform.async_register_entity_service(
+        "clean_zone",
+        {
+            vol.Required("zones"): vol.All(
+                vol.Coerce(list),
+                [vol.All(vol.Coerce(list), [vol.Coerce(int)])],
+            ),
+            vol.Optional("suction_level", default=1): vol.All(
+                int, vol.Range(min=0, max=3)
+            ),
+            vol.Optional("water_volume", default=2): vol.All(
+                int, vol.Range(min=1, max=3)
+            ),
+            vol.Optional("repeat", default=1): vol.All(
+                int, vol.Range(min=1, max=3)
+            ),
+            vol.Optional("cleaning_mode", default=2): vol.All(
+                int, vol.Range(min=0, max=2)
+            ),
+        },
+        "async_clean_zone",
+    )
 
 
 class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
@@ -153,6 +175,8 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         cmd_params = params if isinstance(params, dict) else {}
         if command == "clean_segment":
             await self.async_clean_segment(**cmd_params)
+        elif command == "clean_zone":
+            await self.async_clean_zone(**cmd_params)
         elif command == "request_map":
             await self.coordinator.device.get_map()
             await self.coordinator.async_request_refresh()
@@ -185,6 +209,31 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             for seg in segments
         ]
         value = json.dumps({"selects": selects})
+
+        await self.coordinator.device.send_action(
+            4, 1, params=[{"piid": 1, "value": value}]
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_clean_zone(
+        self,
+        zones: list[list[int]] | None = None,
+        suction_level: int = 1,
+        water_volume: int = 2,
+        repeat: int = 1,
+        cleaning_mode: int = 2,
+        **kwargs: Any,
+    ) -> None:
+        """Clean specific zones by coordinates."""
+        if not zones:
+            return
+
+        value = json.dumps({
+            "areas": [
+                [*zone, suction_level, water_volume, repeat, cleaning_mode]
+                for zone in zones
+            ],
+        })
 
         await self.coordinator.device.send_action(
             4, 1, params=[{"piid": 1, "value": value}]

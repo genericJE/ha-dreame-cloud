@@ -3,9 +3,9 @@
   "configurations": [
     {
       "name": "homeassistant",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["dev/proxy.py"],
-      "port": 8123
+      "runtimeExecutable": "/opt/homebrew/bin/python3",
+      "runtimeArgs": ["-m", "http.server", "8124", "--directory", "/Users/je/Documents/JE/Python/ha-dreame-cloud/.claude/worktrees/nervous-wilson/dev"],
+      "port": 8124
     }
   ]
 }

@@ -5,7 +5,7 @@ import sys
 
 REMOTE_HOST = "homeassistant.local"
 REMOTE_PORT = 8123
-LOCAL_PORT = 8123
+LOCAL_PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8123
 
 
 async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
