@@ -114,27 +114,38 @@ def _render_map(map_data: DreameMap) -> bytes:
     # Color walls
     img_array[is_wall] = COLOR_WALL
 
+    # Flip along x axis, then rotate 90 degrees clockwise
+    img_array = np.flip(img_array, axis=1)
+    img_array = np.rot90(img_array, k=-1)
+    h_new, w_new = img_array.shape[:2]
+
     img = Image.fromarray(img_array, "RGB")
     draw = ImageDraw.Draw(img)
 
+    # Transform marker coordinates: flip x, then rotate 90 CW
+    # flip x: x' = (w - 1) - x
+    # rot90 CW: (x', y) -> (y, (w_new - 1) - x')  [but w_new = h, h_new = w after rot]
+    def transform(px: int, py: int) -> tuple[int, int]:
+        fx = (w - 1) - (px - header.left)
+        fy = py - header.top
+        return fy, (h_new - 1) - fx
+
     # Draw charger
-    cx = header.charger_x - header.left
-    cy = header.charger_y - header.top
-    if 0 <= cx < w and 0 <= cy < h:
-        r = max(3, min(w, h) // 60)
+    cx, cy = transform(header.charger_x, header.charger_y)
+    if 0 <= cx < w_new and 0 <= cy < h_new:
+        r = max(3, min(w_new, h_new) // 60)
         draw.rectangle([cx - r, cy - r, cx + r, cy + r], fill=COLOR_CHARGER)
 
     # Draw robot
-    rx = header.robot_x - header.left
-    ry = header.robot_y - header.top
-    if 0 <= rx < w and 0 <= ry < h:
-        r = max(3, min(w, h) // 50)
+    rx, ry = transform(header.robot_x, header.robot_y)
+    if 0 <= rx < w_new and 0 <= ry < h_new:
+        r = max(3, min(w_new, h_new) // 50)
         draw.ellipse([rx - r, ry - r, rx + r, ry + r], fill=COLOR_ROBOT)
 
     # Scale up for better visibility
-    scale = max(1, 800 // max(w, h))
+    scale = max(1, 800 // max(w_new, h_new))
     if scale > 1:
-        img = img.resize((w * scale, h * scale), Image.Resampling.NEAREST)
+        img = img.resize((w_new * scale, h_new * scale), Image.Resampling.NEAREST)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
