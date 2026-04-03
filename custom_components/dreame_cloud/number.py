@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import DreameCloudConfigEntry
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: Any,
+    entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up number entities."""

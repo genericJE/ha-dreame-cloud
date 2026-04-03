@@ -9,6 +9,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from dreame_mocker.client import (
@@ -19,6 +20,7 @@ from dreame_mocker.client import (
     DreameError,
     DreameMap,
 )
+from dreame_mocker.const import STATES, DeviceState, Property
 
 from .const import DEFAULT_PORT, DEFAULT_SCAN_INTERVAL, MAP_UPDATE_INTERVAL_CLEANING, MAP_UPDATE_INTERVAL_IDLE
 
@@ -95,7 +97,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             self._device = await self._cloud.get_device()
             self._connected = True
         except AuthenticationError as err:
-            raise UpdateFailed(f"Authentication failed: {err}") from err
+            raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
         except DreameError as err:
             raise UpdateFailed(f"Failed to connect: {err}") from err
 
@@ -105,44 +107,64 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             await self._async_setup()
 
         try:
-            status = await self.device.get_status()
-
-            # Fetch additional properties (consumables, DND, volume)
-            extra_props = await self.device.get_properties([
-                (9, 2),   # Main brush life level
-                (10, 2),  # Side brush life level
-                (11, 2),  # Filter life level
-                (16, 2),  # Mop pad life level
-                (12, 1),  # DND enabled
-                (7, 1),   # Volume
+            # Single RPC call for all properties (status + consumables + extras).
+            all_props = await self.device.get_properties([
+                Property.STATE,
+                Property.BATTERY_LEVEL,
+                Property.ERROR,
+                Property.SUCTION_LEVEL,
+                Property.WATER_VOLUME,
+                Property.CLEANING_MODE,
+                Property.CLEANING_TIME,
+                Property.CLEANING_AREA,
+                Property.MAIN_BRUSH_LIFE_LEVEL,
+                Property.SIDE_BRUSH_LIFE_LEVEL,
+                Property.FILTER_LIFE_LEVEL,
+                Property.MOP_PAD_LIFE_LEVEL,
+                Property.DND_ENABLED,
+                Property.VOLUME,
             ])
 
-            consumables: dict[str, int] = {}
-            dnd_enabled = False
-            volume = 50
+            # Index results by (siid, piid) for easy lookup.
+            values: dict[tuple[int, int], Any] = {}
+            for prop in all_props:
+                key = (prop.get("siid", 0), prop.get("piid", 0))
+                values[key] = prop.get("value", 0)
 
-            for prop in extra_props:
-                siid = prop.get("siid", 0)
-                piid = prop.get("piid", 0)
-                value: Any = prop.get("value")
-                if value is None:
-                    continue
-                if (siid, piid) == (9, 2):
-                    consumables["main_brush"] = int(value)
-                elif (siid, piid) == (10, 2):
-                    consumables["side_brush"] = int(value)
-                elif (siid, piid) == (11, 2):
-                    consumables["filter"] = int(value)
-                elif (siid, piid) == (16, 2):
-                    consumables["mop_pad"] = int(value)
-                elif (siid, piid) == (12, 1):
-                    dnd_enabled = bool(value)
-                elif (siid, piid) == (7, 1):
-                    volume = int(value)
+            state = int(values.get(Property.STATE, 0))
+            status = DeviceStatus(
+                state=state,
+                state_name=STATES.get(state, str(state)),
+                battery=int(values.get(Property.BATTERY_LEVEL, 0)),
+                error=int(values.get(Property.ERROR, 0)),
+                suction_level=int(values.get(Property.SUCTION_LEVEL, 0)),
+                water_volume=int(values.get(Property.WATER_VOLUME, 0)),
+                cleaning_mode=int(values.get(Property.CLEANING_MODE, 0)),
+                cleaning_time=int(values.get(Property.CLEANING_TIME, 0)),
+                cleaning_area=int(values.get(Property.CLEANING_AREA, 0)),
+            )
+
+            consumables: dict[str, int] = {}
+            for prop_key, name in (
+                (Property.MAIN_BRUSH_LIFE_LEVEL, "main_brush"),
+                (Property.SIDE_BRUSH_LIFE_LEVEL, "side_brush"),
+                (Property.FILTER_LIFE_LEVEL, "filter"),
+                (Property.MOP_PAD_LIFE_LEVEL, "mop_pad"),
+            ):
+                val = values.get(prop_key)
+                if val is not None:
+                    consumables[name] = int(val)
+
+            dnd_enabled = bool(values.get(Property.DND_ENABLED, False))
+            volume = int(values.get(Property.VOLUME, 50))
 
             # Update map periodically
             now = time.monotonic()
-            is_cleaning = status.state in (1, 7, 12)
+            is_cleaning = status.state in (
+                DeviceState.SWEEPING,
+                DeviceState.MOPPING,
+                DeviceState.SWEEP_AND_MOP,
+            )
             map_interval = (
                 MAP_UPDATE_INTERVAL_CLEANING if is_cleaning else MAP_UPDATE_INTERVAL_IDLE
             )
@@ -163,7 +185,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             )
         except AuthenticationError as err:
             self._connected = False
-            raise UpdateFailed(f"Authentication failed: {err}") from err
+            raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
         except DreameError as err:
             self._connected = False
             raise UpdateFailed(f"Update failed: {err}") from err

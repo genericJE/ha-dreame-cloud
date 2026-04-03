@@ -2,22 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import DreameCloudConfigEntry
 from .const import (
     CLEANING_MODE_TO_INT,
     CLEANING_MODES,
     CONF_MAP_ROTATION,
-    FAN_SPEEDS,
-    FAN_SPEED_TO_SUCTION,
     INT_TO_CLEANING_MODE,
     INT_TO_WATER_VOLUME,
-    SUCTION_TO_FAN_SPEED,
     WATER_VOLUME_TO_INT,
     WATER_VOLUMES,
 )
@@ -29,45 +25,16 @@ _ROTATION_OPTIONS = ["0°", "90°", "180°", "270°"]
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: Any,
+    entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up select entities."""
     coordinator: DreameCloudCoordinator = entry.runtime_data
     async_add_entities([
-        DreameCloudSuctionSelect(coordinator),
         DreameCloudWaterVolumeSelect(coordinator),
         DreameCloudCleaningModeSelect(coordinator),
         DreameCloudMapRotationSelect(coordinator),
     ])
-
-
-class DreameCloudSuctionSelect(DreameCloudEntity, SelectEntity):
-    """Select entity for suction level."""
-
-    _attr_icon = "mdi:fan"
-    _attr_translation_key = "suction_level"
-    _attr_options = FAN_SPEEDS
-
-    def __init__(self, coordinator: DreameCloudCoordinator) -> None:
-        """Initialize."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.device_id}_suction_level"
-
-    @property
-    def current_option(self) -> str | None:
-        """Return the current suction level."""
-        return SUCTION_TO_FAN_SPEED.get(
-            self.coordinator.data.status.suction_level
-        )
-
-    async def async_select_option(self, option: str) -> None:
-        """Set the suction level."""
-        if option in FAN_SPEED_TO_SUCTION:
-            await self.coordinator.device.set_suction_level(
-                FAN_SPEED_TO_SUCTION[option]
-            )
-            await self.coordinator.async_request_refresh()
 
 
 class DreameCloudWaterVolumeSelect(DreameCloudEntity, SelectEntity):

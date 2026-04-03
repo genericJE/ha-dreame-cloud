@@ -16,6 +16,9 @@ from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import voluptuous as vol
 
+from dreame_mocker.const import DeviceState
+
+from . import DreameCloudConfigEntry
 from .const import (
     FAN_SPEEDS,
     FAN_SPEED_TO_SUCTION,
@@ -28,25 +31,25 @@ _LOGGER = logging.getLogger(__name__)
 
 # Map Dreame device state to HA VacuumActivity
 STATE_MAP: dict[int, VacuumActivity] = {
-    1: VacuumActivity.CLEANING,   # Sweeping
-    2: VacuumActivity.IDLE,       # Idle
-    3: VacuumActivity.PAUSED,     # Paused
-    4: VacuumActivity.ERROR,      # Error
-    5: VacuumActivity.RETURNING,  # Returning
-    6: VacuumActivity.DOCKED,     # Charging
-    7: VacuumActivity.CLEANING,   # Mopping
-    8: VacuumActivity.DOCKED,     # Drying
-    9: VacuumActivity.DOCKED,     # Washing
-    12: VacuumActivity.CLEANING,  # Sweep+Mop
-    13: VacuumActivity.DOCKED,    # Charge Complete
-    20: VacuumActivity.DOCKED,    # Mop Washing
-    21: VacuumActivity.PAUSED,    # Mop Washing Paused
+    DeviceState.SWEEPING: VacuumActivity.CLEANING,
+    DeviceState.IDLE: VacuumActivity.IDLE,
+    DeviceState.PAUSED: VacuumActivity.PAUSED,
+    DeviceState.ERROR: VacuumActivity.ERROR,
+    DeviceState.RETURNING: VacuumActivity.RETURNING,
+    DeviceState.CHARGING: VacuumActivity.DOCKED,
+    DeviceState.MOPPING: VacuumActivity.CLEANING,
+    DeviceState.DRYING: VacuumActivity.DOCKED,
+    DeviceState.WASHING: VacuumActivity.DOCKED,
+    DeviceState.SWEEP_AND_MOP: VacuumActivity.CLEANING,
+    DeviceState.CHARGE_COMPLETE: VacuumActivity.DOCKED,
+    DeviceState.MOP_WASHING: VacuumActivity.DOCKED,
+    DeviceState.MOP_WASHING_PAUSED: VacuumActivity.PAUSED,
 }
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: Any,
+    entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the vacuum platform."""
@@ -191,15 +194,8 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
-        status = self.coordinator.data.status
         attrs: dict[str, Any] = {
-            "state_name": status.state_name,
-            "cleaning_time": status.cleaning_time,
-            "cleaning_area": status.cleaning_area,
-            "error_code": status.error,
-            "suction_level": status.suction_level,
-            "water_volume": status.water_volume,
-            "cleaning_mode": status.cleaning_mode,
+            "error_code": self.coordinator.data.status.error,
         }
         if self.coordinator.data.map_data:
             rooms = self.coordinator.data.map_data.rooms

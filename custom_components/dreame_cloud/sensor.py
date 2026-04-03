@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -14,6 +12,7 @@ from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import DreameCloudConfigEntry
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
 
@@ -81,7 +80,7 @@ SENSOR_DESCRIPTIONS: list[SensorEntityDescription] = [
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: Any,
+    entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensor entities."""

@@ -9,6 +9,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import DreameCloudConfigEntry
 from .const import CONF_MAP_FLIP_X, CONF_MAP_FLIP_Y
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
@@ -16,7 +17,7 @@ from .entity import DreameCloudEntity
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: Any,
+    entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up switch entities."""

@@ -93,9 +93,6 @@
       }
     },
     "select": {
-      "suction_level": {
-        "name": "Suction Level"
-      },
       "water_volume": {
         "name": "Water Volume"
       },

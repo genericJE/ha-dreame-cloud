@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Any
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -15,6 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from dreame_mocker.client import DreameMap
 
+from . import DreameCloudConfigEntry
 from .const import (
     COLOR_BACKGROUND,
     COLOR_CHARGER,
@@ -33,7 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: Any,
+    entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the camera platform."""
@@ -54,6 +54,23 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
         self._image: bytes | None = None
         self._last_frame_id: int | None = None
         self._last_opts: tuple[int, bool, bool] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Register for option updates when added to hass."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.coordinator.config_entry.add_update_listener(
+                self._async_options_updated
+            )
+        )
+
+    @staticmethod
+    async def _async_options_updated(
+        hass: HomeAssistant, entry: DreameCloudConfigEntry
+    ) -> None:
+        """Trigger a coordinator update when map options change."""
+        coordinator: DreameCloudCoordinator = entry.runtime_data
+        coordinator.async_set_updated_data(coordinator.data)
 
     @property
     def frame_interval(self) -> float:

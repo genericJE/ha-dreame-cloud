@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from dreame_mocker.client import DreameDevice
 
+from . import DreameCloudConfigEntry
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
 
@@ -47,7 +48,7 @@ BUTTON_DESCRIPTIONS: list[DreameButtonDescription] = [
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: Any,
+    entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up button entities."""

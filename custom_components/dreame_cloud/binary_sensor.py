@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -11,13 +9,16 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from dreame_mocker.const import DeviceState
+
+from . import DreameCloudConfigEntry
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: Any,
+    entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up binary sensor entities."""
@@ -39,5 +40,4 @@ class DreameCloudChargingSensor(DreameCloudEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         """Return true if charging."""
-        # State 6 = Charging, 13 = Charge Complete
-        return self.coordinator.data.status.state in (6, 13)
+        return self.coordinator.data.status.state == DeviceState.CHARGING
