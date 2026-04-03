@@ -20,6 +20,9 @@ from .const import (
     COLOR_CHARGER,
     COLOR_ROBOT,
     COLOR_WALL,
+    CONF_MAP_FLIP_X,
+    CONF_MAP_FLIP_Y,
+    CONF_MAP_ROTATION,
     ROOM_COLORS,
 )
 from .coordinator import DreameCloudCoordinator
@@ -68,14 +71,24 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
 
         frame_id = map_data.header.frame_id
         if frame_id != self._last_frame_id:
+            options = self.coordinator.config_entry.options
             self._image = await self.hass.async_add_executor_job(
-                _render_map, map_data
+                _render_map,
+                map_data,
+                options.get(CONF_MAP_ROTATION, 0),
+                options.get(CONF_MAP_FLIP_X, False),
+                options.get(CONF_MAP_FLIP_Y, False),
             )
             self._last_frame_id = frame_id
         return self._image
 
 
-def _render_map(map_data: DreameMap) -> bytes:
+def _render_map(
+    map_data: DreameMap,
+    rotation: int = 0,
+    flip_x: bool = False,
+    flip_y: bool = False,
+) -> bytes:
     """Render map data to a PNG image."""
     header = map_data.header
     w, h = header.width, header.height
@@ -114,38 +127,49 @@ def _render_map(map_data: DreameMap) -> bytes:
     # Color walls
     img_array[is_wall] = COLOR_WALL
 
-    # Flip along x axis, then rotate 90 degrees clockwise
-    img_array = np.flip(img_array, axis=1)
-    img_array = np.rot90(img_array, k=-1)
-    h_new, w_new = img_array.shape[:2]
+    # Apply orientation transforms
+    if flip_x:
+        img_array = np.flip(img_array, axis=1)
+    if flip_y:
+        img_array = np.flip(img_array, axis=0)
+    if rotation:
+        img_array = np.rot90(img_array, k=-(rotation // 90))
+
+    h_out, w_out = img_array.shape[:2]
 
     img = Image.fromarray(img_array, "RGB")
     draw = ImageDraw.Draw(img)
 
-    # Transform marker coordinates: flip x, then rotate 90 CW
-    # flip x: x' = (w - 1) - x
-    # rot90 CW: (x', y) -> (y, (w_new - 1) - x')  [but w_new = h, h_new = w after rot]
+    # Transform marker coordinates through the same flip/rotate operations
     def transform(px: int, py: int) -> tuple[int, int]:
-        fx = (w - 1) - (px - header.left)
-        fy = py - header.top
-        return fy, (h_new - 1) - fx
+        x = px - header.left
+        y = py - header.top
+        cur_w, cur_h = w, h
+        if flip_x:
+            x = (cur_w - 1) - x
+        if flip_y:
+            y = (cur_h - 1) - y
+        for _ in range(rotation // 90):
+            x, y = cur_h - 1 - y, x
+            cur_w, cur_h = cur_h, cur_w
+        return x, y
 
     # Draw charger
     cx, cy = transform(header.charger_x, header.charger_y)
-    if 0 <= cx < w_new and 0 <= cy < h_new:
-        r = max(3, min(w_new, h_new) // 60)
+    if 0 <= cx < w_out and 0 <= cy < h_out:
+        r = max(3, min(w_out, h_out) // 60)
         draw.rectangle([cx - r, cy - r, cx + r, cy + r], fill=COLOR_CHARGER)
 
     # Draw robot
     rx, ry = transform(header.robot_x, header.robot_y)
-    if 0 <= rx < w_new and 0 <= ry < h_new:
-        r = max(3, min(w_new, h_new) // 50)
+    if 0 <= rx < w_out and 0 <= ry < h_out:
+        r = max(3, min(w_out, h_out) // 50)
         draw.ellipse([rx - r, ry - r, rx + r, ry + r], fill=COLOR_ROBOT)
 
     # Scale up for better visibility
-    scale = max(1, 800 // max(w_new, h_new))
+    scale = max(1, 800 // max(w_out, h_out))
     if scale > 1:
-        img = img.resize((w_new * scale, h_new * scale), Image.Resampling.NEAREST)
+        img = img.resize((w_out * scale, h_out * scale), Image.Resampling.NEAREST)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
