@@ -107,15 +107,18 @@ class DreameCloudCleaningModeSelect(DreameCloudEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        """Return the current cleaning mode."""
-        return INT_TO_CLEANING_MODE.get(
-            self.coordinator.data.status.cleaning_mode
-        )
+        """Return the current cleaning mode.
+
+        The real device returns a composite value where the lower byte
+        is the cleaning mode and upper bytes encode wash/humidity settings.
+        """
+        raw = self.coordinator.data.status.cleaning_mode
+        return INT_TO_CLEANING_MODE.get(raw & 0xFF)
 
     async def async_select_option(self, option: str) -> None:
-        """Set the cleaning mode."""
+        """Set the cleaning mode, preserving the upper bytes."""
         if option in CLEANING_MODE_TO_INT:
-            await self.coordinator.device.set_cleaning_mode(
-                CLEANING_MODE_TO_INT[option]
-            )
+            raw = self.coordinator.data.status.cleaning_mode
+            new_value = (raw & ~0xFF) | CLEANING_MODE_TO_INT[option]
+            await self.coordinator.device.set_cleaning_mode(new_value)
             await self.coordinator.async_request_refresh()
