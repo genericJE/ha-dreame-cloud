@@ -59,7 +59,10 @@ class DreameCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not devices:
                     errors["base"] = "no_devices"
                 else:
-                    await self.async_set_unique_id(user_input[CONF_USERNAME])
+                    host_tag = host or "cloud"
+                    await self.async_set_unique_id(
+                        f"{user_input[CONF_USERNAME]}_{host_tag}"
+                    )
                     self._abort_if_unique_id_configured()
                     return self.async_create_entry(
                         title=f"Dreame ({user_input[CONF_USERNAME]})",
