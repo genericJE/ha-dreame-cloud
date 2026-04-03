@@ -23,18 +23,6 @@
       "already_configured": "This account is already configured."
     }
   },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Map Display",
-        "data": {
-          "map_rotation": "Rotation",
-          "map_flip_x": "Flip horizontally",
-          "map_flip_y": "Flip vertically"
-        }
-      }
-    }
-  },
   "entity": {
     "vacuum": {
       "vacuum": {
@@ -80,6 +68,12 @@
     "switch": {
       "dnd": {
         "name": "Do Not Disturb"
+      },
+      "map_flip_x": {
+        "name": "Map Flip Horizontal"
+      },
+      "map_flip_y": {
+        "name": "Map Flip Vertical"
       }
     },
     "button": {
@@ -107,6 +101,9 @@
       },
       "cleaning_mode": {
         "name": "Cleaning Mode"
+      },
+      "map_rotation": {
+        "name": "Map Rotation"
       }
     }
   }

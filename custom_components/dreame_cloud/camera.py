@@ -53,6 +53,7 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
         self._attr_unique_id = f"{coordinator.device_id}_map"
         self._image: bytes | None = None
         self._last_frame_id: int | None = None
+        self._last_opts: tuple[int, bool, bool] | None = None
 
     @property
     def frame_interval(self) -> float:
@@ -70,16 +71,18 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
             return self._image
 
         frame_id = map_data.header.frame_id
-        if frame_id != self._last_frame_id:
-            options = self.coordinator.config_entry.options
+        options = self.coordinator.config_entry.options
+        opts_key = (
+            options.get(CONF_MAP_ROTATION, 0),
+            options.get(CONF_MAP_FLIP_X, False),
+            options.get(CONF_MAP_FLIP_Y, False),
+        )
+        if frame_id != self._last_frame_id or opts_key != self._last_opts:
             self._image = await self.hass.async_add_executor_job(
-                _render_map,
-                map_data,
-                options.get(CONF_MAP_ROTATION, 0),
-                options.get(CONF_MAP_FLIP_X, False),
-                options.get(CONF_MAP_FLIP_Y, False),
+                _render_map, map_data, *opts_key
             )
             self._last_frame_id = frame_id
+            self._last_opts = opts_key
         return self._image
 
 

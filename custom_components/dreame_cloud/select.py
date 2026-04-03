@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CLEANING_MODE_TO_INT,
     CLEANING_MODES,
+    CONF_MAP_ROTATION,
     FAN_SPEEDS,
     FAN_SPEED_TO_SUCTION,
     INT_TO_CLEANING_MODE,
@@ -21,6 +23,8 @@ from .const import (
 )
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
+
+_ROTATION_OPTIONS = ["0°", "90°", "180°", "270°"]
 
 
 async def async_setup_entry(
@@ -34,6 +38,7 @@ async def async_setup_entry(
         DreameCloudSuctionSelect(coordinator),
         DreameCloudWaterVolumeSelect(coordinator),
         DreameCloudCleaningModeSelect(coordinator),
+        DreameCloudMapRotationSelect(coordinator),
     ])
 
 
@@ -122,3 +127,33 @@ class DreameCloudCleaningModeSelect(DreameCloudEntity, SelectEntity):
             new_value = (raw & ~0xFF) | CLEANING_MODE_TO_INT[option]
             await self.coordinator.device.set_cleaning_mode(new_value)
             await self.coordinator.async_request_refresh()
+
+
+class DreameCloudMapRotationSelect(DreameCloudEntity, SelectEntity):
+    """Select entity for map rotation."""
+
+    _attr_icon = "mdi:rotate-right"
+    _attr_translation_key = "map_rotation"
+    _attr_options = _ROTATION_OPTIONS
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameCloudCoordinator) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.device_id}_map_rotation"
+
+    @property
+    def current_option(self) -> str:
+        """Return the current rotation."""
+        rotation = self.coordinator.config_entry.options.get(CONF_MAP_ROTATION, 0)
+        return f"{rotation}°"
+
+    async def async_select_option(self, option: str) -> None:
+        """Set the map rotation."""
+        rotation = int(option.rstrip("°"))
+        new_options = dict(self.coordinator.config_entry.options)
+        new_options[CONF_MAP_ROTATION] = rotation
+        self.hass.config_entries.async_update_entry(
+            self.coordinator.config_entry, options=new_options
+        )
+        self.async_write_ha_state()
