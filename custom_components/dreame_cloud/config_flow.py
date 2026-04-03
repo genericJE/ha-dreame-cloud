@@ -1,4 +1,4 @@
-"""Config flow for Dreame Cloud."""
+"""Config flow for Dreame Cloud Vacuum."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 
 class DreameCloudConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Dreame Cloud."""
+    """Handle a config flow for Dreame Cloud Vacuum."""
 
     VERSION = 1
 
@@ -59,10 +59,10 @@ class DreameCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not devices:
                     errors["base"] = "no_devices"
                 else:
-                    host_tag = host or "cloud"
-                    await self.async_set_unique_id(
-                        f"{user_input[CONF_USERNAME]}_{host_tag}"
-                    )
+                    unique = user_input[CONF_USERNAME]
+                    if host:
+                        unique = f"{unique}_{host}"
+                    await self.async_set_unique_id(unique)
                     self._abort_if_unique_id_configured()
                     return self.async_create_entry(
                         title=f"Dreame ({user_input[CONF_USERNAME]})",
