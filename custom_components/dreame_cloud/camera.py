@@ -466,16 +466,35 @@ def _compute_carpet_zones(
     return zones
 
 
-# Furniture type names from Dreame firmware
+# Furniture type IDs from Dreame firmware (FurnitureType enum).
+# Reference: Tasshack/dreame-vacuum dev branch types.py
 _FURNITURE_TYPES: dict[int, str] = {
-    3: "Chair",
-    4: "Table",
-    6: "Sofa",
-    7: "Trash Can",
-    14: "Shoe Rack",
-    18: "Shelf",
-    20: "Curtain",
-    21: "TV Stand",
+    1: "Single Bed",
+    2: "Double Bed",
+    3: "Armchair",
+    4: "Two Seat Sofa",
+    5: "Three Seat Sofa",
+    6: "Dining Table",
+    7: "Nightstand",
+    8: "Coffee Table",
+    9: "Toilet",
+    10: "Litter Box",
+    11: "Pet Bed",
+    12: "Food Bowl",
+    13: "Pet Toilet",
+    14: "Refrigerator",
+    15: "Washing Machine",
+    16: "Enclosed Litter Box",
+    17: "Air Conditioner",
+    18: "TV Cabinet",
+    19: "Bookshelf",
+    20: "Shoe Cabinet",
+    21: "Wardrobe",
+    22: "Greenery",
+    23: "Floor Mirror",
+    24: "L-Shaped Sofa",
+    25: "Round Coffee Table",
+    26: "Table",
 }
 
 
