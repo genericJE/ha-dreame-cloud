@@ -79,9 +79,18 @@ Carpet detection on this model is pixel-level only (0x40 bitmask), not metadata-
 
 ## Coordinate systems
 
-- **Vacuum coords**: millimeters from map origin. Origin = `metadata["origin"]` or `[header.left * pixel_size, header.top * pixel_size]`
-- **Pixel indices**: `px = (vac_x - left * pixel_size) / pixel_size`, `py = (vac_y - top * pixel_size) / pixel_size`
+- **Vacuum coords**: millimeters from map origin. `header.left` and `header.top` are in vacuum coords (not pixel indices).
+- **Pixel indices**: `px = (vac_x - header.left) / pixel_size`, `py = (vac_y - header.top) / pixel_size`
 - **Image coords**: pixel indices after flip/rotation transforms, then scaled
+
+### Coordinate transform pipeline
+
+Python (`camera.py`): vacuum → pixel → flip → rotate → scale = image coords
+JS (`_imageToVacuumCoords`): image → reverse scale → reverse rotate → reverse flip → pixel → vacuum coords
+
+The forward transform applies `flip_x → flip_y → rotate(N steps) → scale`.
+The reverse applies `÷scale → rotate(N inverse steps) → reverse flip_y → reverse flip_x → to vacuum`.
+The rotation inverse step `(x,y) → (y, curW-1-x)` is iterated `rotation/90` times (not `(360-rotation)/90`, which would apply the forward step instead).
 
 ## Deployment to HA
 
@@ -105,13 +114,26 @@ Entity IDs are derived from the device name, not the integration domain:
 - `vacuum.x50_ultra_complete_vacuum` (not `vacuum.dreame_cloud_vacuum`)
 - `camera.x50_ultra_complete_map` (not `camera.dreame_cloud_vacuum_map`)
 
+## Zone editing data flow
+
+The map card's edit mode lets users draw/delete zones (no-go, virtual walls, thresholds, etc.). The save flow:
+
+1. JS card converts drawn image coords to vacuum coords via `_imageToVacuumCoords`
+2. Calls `dreame_cloud.update_map` service with zone arrays
+3. `vacuum.py` sends `send_action(6, 2)` to the vacuum and caches the sent data in `coordinator._pending_zone_update`
+4. `coordinator._last_map_update` is reset to 0 to bypass the idle throttle
+5. `camera.py`'s `_handle_coordinator_update` re-renders the map, overlaying `_pending_zone_update` onto stale `rism` data
+6. The entity updates immediately with the new zone positions
+
+The pending overlay is necessary because the cloud's `rism` blob updates lazily (minutes to hours). Without it, deleted zones reappear from stale `rism` data.
+
 ## Services
 
 Custom services registered on the vacuum platform:
 - `dreame_cloud.clean_segment` (room IDs + settings)
 - `dreame_cloud.clean_zone` (coordinate rectangles + settings)
 - `dreame_cloud.goto` (x, y vacuum coords; uses spot cleaning at target point)
-- `dreame_cloud.update_map` (no-go zones, virtual walls, low-clearance zones)
+- `dreame_cloud.update_map` (no-go zones, virtual walls, low-clearance zones, thresholds)
 - `dreame_cloud.request_map` (req_type parameter for investigation; logs metadata keys)
 
 ## Key constants
@@ -120,6 +142,6 @@ Custom services registered on the vacuum platform:
   - Segment clean: `piid 1 = json({"selects": [[seg, suction, water, repeat, mode]]})`
   - Zone clean: `piid 1 = json({"areas": [[x1,y1,x2,y2, suction, water, repeat, mode]]})`
   - Goto/spot: `piid 1 = 20` (spot status) + `piid 10 = json({"points": [[x, y, repeats, suction, water]]})`
-- `send_action(6, 2, ...)` = map updates, piid 4 = `json({"vw": {"line": [...], "rect": [...]}, "sneak_areas": [...]})`
+- `send_action(6, 2, ...)` = map updates, piid 4 = `json({"vw": {"line": [...], "rect": [...], "cliff": [...]}, "vws": {"vwsl": [...], "npthrsd": [...], "ramp": [...]}, "sneak_areas": [...]})`
 - `send_action(6, 1, ...)` = request map data, piid 2 = `json({"req_type": 1, "frame_type": "I", "force_type": 1})`
 - Pixel size: typically 50 (= 5cm per pixel)
