@@ -323,6 +323,8 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         await self.coordinator.device.send_action(
             6, 2, params=[{"piid": 4, "value": value}]
         )
+        # Force next refresh to re-fetch map data (bypass idle throttle)
+        self.coordinator._last_map_update = 0  # noqa: SLF001
         await self.coordinator.async_request_refresh()
 
     async def async_clean_zone(

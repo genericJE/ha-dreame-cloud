@@ -1412,19 +1412,36 @@ class DreameVacuumMapCard extends HTMLElement {
       this._exitEditMode();
       this._updateContent();
 
-      // Check if the vacuum rejected any zones after the map refreshes
-      setTimeout(() => {
-        this._checkSaveResult(sentCounts);
-      }, 4000);
+      // Wait for entity to update, then check if the vacuum rejected zones
+      const preSaveTs =
+        this._hass?.states?.[this._entities.map]?.last_updated || "";
+      this._pollForSaveResult(sentCounts, preSaveTs, 0);
     } catch (err) {
       console.error("Failed to save map edits:", err);
       this._showToast("Save failed: " + err.message);
     }
   }
 
+  _pollForSaveResult(sentCounts, preSaveTs, attempt) {
+    const maxAttempts = 20; // ~40 seconds total
+    const camera = this._hass?.states?.[this._entities.map];
+    if (camera && camera.last_updated !== preSaveTs) {
+      this._checkSaveResult(sentCounts);
+      return;
+    }
+    if (attempt >= maxAttempts) {
+      // Give up waiting — check with whatever data we have
+      this._checkSaveResult(sentCounts);
+      return;
+    }
+    setTimeout(() => {
+      this._pollForSaveResult(sentCounts, preSaveTs, attempt + 1);
+    }, 2000);
+  }
+
   _checkSaveResult(sentCounts) {
     if (!this._hass) return;
-    const camera = this._hass.states[this._entities.camera];
+    const camera = this._hass.states[this._entities.map];
     if (!camera) return;
     const a = camera.attributes;
     const attrMap = {
