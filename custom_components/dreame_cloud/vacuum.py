@@ -103,6 +103,26 @@ async def async_setup_entry(
                 [vol.All(vol.Coerce(list), [vol.Coerce(int)])],
             ),
             vol.Optional("low_clearance_zones"): _zone_schema,
+            vol.Optional("thresholds"): vol.Schema(
+                {
+                    vol.Optional("vwsl"): vol.All(
+                        vol.Coerce(list),
+                        [vol.All(vol.Coerce(list), [vol.Coerce(int)])],
+                    ),
+                    vol.Optional("npthrsd"): vol.All(
+                        vol.Coerce(list),
+                        [vol.All(vol.Coerce(list), [vol.Coerce(int)])],
+                    ),
+                    vol.Optional("ramp"): vol.All(
+                        vol.Coerce(list),
+                        [vol.All(vol.Coerce(list), [vol.Coerce(int)])],
+                    ),
+                    vol.Optional("cliff"): vol.All(
+                        vol.Coerce(list),
+                        [vol.All(vol.Coerce(list), [vol.Coerce(int)])],
+                    ),
+                }
+            ),
         },
         "async_update_map",
     )
@@ -264,9 +284,10 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         no_go_zones: list[dict[str, Any]] | None = None,
         virtual_walls: list[list[int]] | None = None,
         low_clearance_zones: list[dict[str, Any]] | None = None,
+        thresholds: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        """Update map data (no-go zones, virtual walls, low-clearance zones).
+        """Update map data (no-go zones, virtual walls, low-clearance zones, thresholds).
 
         Sends an UPDATE_MAP_DATA action (siid 6, aiid 2) with piid 4
         containing the zone data in Dreame protocol format.
@@ -284,6 +305,9 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
 
         if low_clearance_zones is not None:
             update["sneak_areas"] = low_clearance_zones
+
+        if thresholds is not None:
+            update["vws"] = thresholds
 
         if not update:
             return

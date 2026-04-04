@@ -50,11 +50,15 @@ class DreameVacuumMapCard extends HTMLElement {
     this._lastEntityPicture = null;
     this._entities = {};
     // Edit mode state
-    this._editTool = "no_go"; // no_go | wall | carpet | low_clearance
+    this._editTool = "no_go"; // no_go | wall | carpet | low_clearance | threshold | impassable | ramp | cliff
     this._editNoGoZones = [];
     this._editVirtualWalls = [];
     this._editCarpetZones = [];
     this._editLowClearanceZones = [];
+    this._editPassableThresholds = [];
+    this._editImpassableThresholds = [];
+    this._editRamps = [];
+    this._editCliffs = [];
     this._editDirty = false;
     this._drawingWall = null; // {x1, y1, x2, y2} during wall drawing
     this._drawingRect = null; // {x1, y1, x2, y2} during rect drawing (no-go, carpet, low-clearance)
@@ -405,7 +409,7 @@ class DreameVacuumMapCard extends HTMLElement {
       const x = Math.min(d.x1, d.x2), y = Math.min(d.y1, d.y2);
       const w = Math.abs(d.x2 - d.x1), h = Math.abs(d.y2 - d.y1);
       const toolColors = {
-        no_go: "#f44336", carpet: "#9c27b0", low_clearance: "#2196f3",
+        no_go: "#f44336", carpet: "#9c27b0", low_clearance: "#2196f3", ramp: "#ff9800",
       };
       const color = toolColors[this._editTool] || "#f44336";
       svgContent += `
@@ -426,12 +430,67 @@ class DreameVacuumMapCard extends HTMLElement {
       `;
     }
 
-    // Drawing preview for virtual wall
+    // Passable thresholds (green dashed lines)
+    const passableThresholds = this._mode === "edit"
+      ? this._editPassableThresholds
+      : (camera.attributes.passable_thresholds || []);
+    for (const t of passableThresholds) {
+      svgContent += `
+        <line x1="${t.x1}" y1="${t.y1}" x2="${t.x2}" y2="${t.y2}"
+          stroke="#4caf50" stroke-width="3" stroke-dasharray="8 4" stroke-linecap="round"
+          style="${this._mode === "edit" ? "cursor:pointer" : ""}" />
+      `;
+    }
+
+    // Impassable thresholds (red dashed lines, thinner than virtual walls)
+    const impassableThresholds = this._mode === "edit"
+      ? this._editImpassableThresholds
+      : (camera.attributes.impassable_thresholds || []);
+    for (const t of impassableThresholds) {
+      svgContent += `
+        <line x1="${t.x1}" y1="${t.y1}" x2="${t.x2}" y2="${t.y2}"
+          stroke="#ff5722" stroke-width="3" stroke-dasharray="6 4" stroke-linecap="round"
+          style="${this._mode === "edit" ? "cursor:pointer" : ""}" />
+      `;
+    }
+
+    // Cliffs (brown dashed lines)
+    const cliffs = this._mode === "edit"
+      ? this._editCliffs
+      : (camera.attributes.cliffs || []);
+    for (const t of cliffs) {
+      svgContent += `
+        <line x1="${t.x1}" y1="${t.y1}" x2="${t.x2}" y2="${t.y2}"
+          stroke="#795548" stroke-width="3" stroke-dasharray="6 3" stroke-linecap="round"
+          style="${this._mode === "edit" ? "cursor:pointer" : ""}" />
+      `;
+    }
+
+    // Ramps (orange filled rectangles)
+    const ramps = this._mode === "edit"
+      ? this._editRamps
+      : (camera.attributes.ramps || []);
+    for (const ramp of ramps) {
+      if (!ramp.points || ramp.points.length !== 4) continue;
+      const pts = ramp.points.map((p) => `${p.x},${p.y}`).join(" ");
+      svgContent += `
+        <polygon points="${pts}"
+          fill="rgba(255,152,0,0.2)" stroke="#ff9800" stroke-width="2"
+          stroke-dasharray="6 3"
+          style="${this._mode === "edit" ? "cursor:pointer" : ""}" />
+      `;
+    }
+
+    // Drawing preview for line tools (wall, threshold, impassable, cliff)
     if (this._mode === "edit" && this._drawingWall) {
       const d = this._drawingWall;
+      const lineColors = {
+        wall: "#f44336", threshold: "#4caf50", impassable: "#ff5722", cliff: "#795548",
+      };
+      const lineColor = lineColors[this._editTool] || "#f44336";
       svgContent += `
         <line x1="${d.x1}" y1="${d.y1}" x2="${d.x2}" y2="${d.y2}"
-          stroke="#f44336" stroke-width="3" stroke-dasharray="4 2"
+          stroke="${lineColor}" stroke-width="3" stroke-dasharray="4 2"
           stroke-linecap="round" opacity="0.7" />
       `;
     }
@@ -600,11 +659,12 @@ class DreameVacuumMapCard extends HTMLElement {
 
     if (this._mode === "edit") {
       this._pointerStart = { x: pt.x, y: pt.y };
-      if (this._editTool === "wall") {
+      const lineTools = ["wall", "threshold", "impassable", "cliff"];
+      if (lineTools.includes(this._editTool)) {
         this._drawing = true;
         this._drawingWall = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
       } else {
-        // All rect-based tools: no_go, carpet, low_clearance
+        // All rect-based tools: no_go, carpet, low_clearance, ramp
         this._drawing = true;
         this._drawingRect = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
       }
@@ -705,6 +765,11 @@ class DreameVacuumMapCard extends HTMLElement {
             ],
             roi: [vx1, vy1, vx2, vy2, vx3, vy3, vx4, vy4],
           };
+          // Ramps use 4-coord format (two opposite corners), not 8-coord roi
+          if (this._editTool === "ramp") {
+            newZone.vacuum_coords = [vx1, vy1, vx3, vy3];
+            newZone.type = 0;
+          }
           this._getEditZonesForTool().push(newZone);
           this._editDirty = true;
         }
@@ -715,11 +780,12 @@ class DreameVacuumMapCard extends HTMLElement {
         if (dist > 10) {
           const [vx1, vy1] = this._imageToVacuumCoords(d.x1, d.y1);
           const [vx2, vy2] = this._imageToVacuumCoords(d.x2, d.y2);
-          this._editVirtualWalls.push({
+          const newLine = {
             x1: Math.round(d.x1), y1: Math.round(d.y1),
             x2: Math.round(d.x2), y2: Math.round(d.y2),
             vacuum_coords: [vx1, vy1, vx2, vy2],
-          });
+          };
+          this._getEditLinesForTool().push(newLine);
           this._editDirty = true;
         }
         this._drawingWall = null;
@@ -735,7 +801,18 @@ class DreameVacuumMapCard extends HTMLElement {
       case "no_go": return this._editNoGoZones;
       case "carpet": return this._editCarpetZones;
       case "low_clearance": return this._editLowClearanceZones;
+      case "ramp": return this._editRamps;
       default: return this._editNoGoZones;
+    }
+  }
+
+  _getEditLinesForTool() {
+    switch (this._editTool) {
+      case "wall": return this._editVirtualWalls;
+      case "threshold": return this._editPassableThresholds;
+      case "impassable": return this._editImpassableThresholds;
+      case "cliff": return this._editCliffs;
+      default: return this._editVirtualWalls;
     }
   }
 
@@ -745,6 +822,7 @@ class DreameVacuumMapCard extends HTMLElement {
       this._editNoGoZones,
       this._editCarpetZones,
       this._editLowClearanceZones,
+      this._editRamps,
     ];
     for (const zones of allRectZones) {
       for (let i = zones.length - 1; i >= 0; i--) {
@@ -760,14 +838,22 @@ class DreameVacuumMapCard extends HTMLElement {
         }
       }
     }
-    // Check virtual walls
-    const threshold = 12;
-    for (let i = this._editVirtualWalls.length - 1; i >= 0; i--) {
-      const w = this._editVirtualWalls[i];
-      const dist = this._pointToSegmentDist(px, py, w.x1, w.y1, w.x2, w.y2);
-      if (dist <= threshold) {
-        this._editVirtualWalls.splice(i, 1);
-        return true;
+    // Check all line types (virtual walls, thresholds, cliffs)
+    const allLineArrays = [
+      this._editVirtualWalls,
+      this._editPassableThresholds,
+      this._editImpassableThresholds,
+      this._editCliffs,
+    ];
+    const tapThreshold = 12;
+    for (const lines of allLineArrays) {
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const w = lines[i];
+        const dist = this._pointToSegmentDist(px, py, w.x1, w.y1, w.x2, w.y2);
+        if (dist <= tapThreshold) {
+          lines.splice(i, 1);
+          return true;
+        }
       }
     }
     return false;
@@ -789,6 +875,10 @@ class DreameVacuumMapCard extends HTMLElement {
     this._editVirtualWalls = JSON.parse(JSON.stringify(a.virtual_walls || []));
     this._editCarpetZones = JSON.parse(JSON.stringify(a.carpet_zones || []));
     this._editLowClearanceZones = JSON.parse(JSON.stringify(a.low_clearance_zones || []));
+    this._editPassableThresholds = JSON.parse(JSON.stringify(a.passable_thresholds || []));
+    this._editImpassableThresholds = JSON.parse(JSON.stringify(a.impassable_thresholds || []));
+    this._editRamps = JSON.parse(JSON.stringify(a.ramps || []));
+    this._editCliffs = JSON.parse(JSON.stringify(a.cliffs || []));
     this._editTool = "no_go";
     this._editDirty = false;
     this._drawingRect = null;
@@ -801,6 +891,10 @@ class DreameVacuumMapCard extends HTMLElement {
     this._editVirtualWalls = [];
     this._editCarpetZones = [];
     this._editLowClearanceZones = [];
+    this._editPassableThresholds = [];
+    this._editImpassableThresholds = [];
+    this._editRamps = [];
+    this._editCliffs = [];
     this._editDirty = false;
     this._drawingRect = null;
     this._drawingWall = null;
@@ -880,18 +974,30 @@ class DreameVacuumMapCard extends HTMLElement {
         { id: "wall", icon: "mdi:wall", label: "Wall" },
         { id: "carpet", icon: "mdi:rug", label: "Carpet" },
         { id: "low_clearance", icon: "mdi:human-male-height", label: "Low Clear." },
+        { id: "threshold", icon: "mdi:door-open", label: "Passable" },
+        { id: "impassable", icon: "mdi:door-closed-lock", label: "Impass." },
+        { id: "ramp", icon: "mdi:slope-uphill", label: "Ramp" },
+        { id: "cliff", icon: "mdi:stairs", label: "Cliff" },
       ];
       const hints = {
         no_go: "Draw a rectangle for a no-go zone. Tap an existing zone to delete.",
         wall: "Draw a line for a virtual wall. Tap an existing wall to delete.",
         carpet: "Draw a rectangle to mark a carpet area. Tap to delete.",
         low_clearance: "Draw a rectangle for a low-clearance area. Tap to delete.",
+        threshold: "Draw a line for a passable threshold. Tap to delete.",
+        impassable: "Draw a line for an impassable threshold. Tap to delete.",
+        ramp: "Draw a rectangle for a ramp area. Tap to delete.",
+        cliff: "Draw a line for a cliff edge. Tap to delete.",
       };
       const counts = [
         [this._editNoGoZones.length, "no-go"],
         [this._editVirtualWalls.length, "wall"],
         [this._editCarpetZones.length, "carpet"],
         [this._editLowClearanceZones.length, "low-clear."],
+        [this._editPassableThresholds.length, "passable"],
+        [this._editImpassableThresholds.length, "impass."],
+        [this._editRamps.length, "ramp"],
+        [this._editCliffs.length, "cliff"],
       ].filter(([c]) => c > 0).map(([c, l]) => `${c} ${l}`).join(" · ");
 
       container.innerHTML = `
@@ -1273,12 +1379,39 @@ class DreameVacuumMapCard extends HTMLElement {
     }));
 
     try {
-      await this._hass.callService("dreame_cloud", "update_map", {
+      const serviceData = {
         entity_id: this._entities.vacuum,
         no_go_zones: buildZonePayload(this._editNoGoZones),
         virtual_walls: this._editVirtualWalls.map((wall) => wall.vacuum_coords),
         low_clearance_zones: buildZonePayload(this._editLowClearanceZones),
-      });
+      };
+
+      // Include threshold data if any exist
+      const hasThresholds = this._editPassableThresholds.length > 0
+        || this._editImpassableThresholds.length > 0
+        || this._editRamps.length > 0
+        || this._editCliffs.length > 0;
+      if (hasThresholds) {
+        const vws = {};
+        if (this._editPassableThresholds.length > 0) {
+          vws.vwsl = this._editPassableThresholds.map((t) => t.vacuum_coords);
+        }
+        if (this._editImpassableThresholds.length > 0) {
+          vws.npthrsd = this._editImpassableThresholds.map((t) => t.vacuum_coords);
+        }
+        if (this._editRamps.length > 0) {
+          vws.ramp = this._editRamps.map((r) => {
+            const vc = r.vacuum_coords || [];
+            return r.type != null ? [...vc, r.type] : vc;
+          });
+        }
+        if (this._editCliffs.length > 0) {
+          vws.cliff = this._editCliffs.map((t) => t.vacuum_coords);
+        }
+        serviceData.thresholds = vws;
+      }
+
+      await this._hass.callService("dreame_cloud", "update_map", serviceData);
       this._mode = "all";
       DreameVacuumMapCard._persistedMode = "all";
       this._exitEditMode();

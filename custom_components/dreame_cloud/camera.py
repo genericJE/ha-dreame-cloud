@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 from typing import Any
 
@@ -457,6 +458,87 @@ _FURNITURE_TYPES: dict[int, str] = {
 }
 
 
+def _transform_threshold_lines(
+    vws: dict[str, Any],
+    sub_key: str,
+    header: MapHeader,
+    w: int,
+    h: int,
+    flip_x: bool,
+    flip_y: bool,
+    rotation: int,
+    scale: int,
+) -> list[dict[str, Any]]:
+    """Transform threshold line segments (vws.vwsl, vws.npthrsd, vws.cliff) to image coords."""
+    lines = vws.get(sub_key, [])
+    if not lines:
+        return []
+
+    result = []
+    for line in lines:
+        if not isinstance(line, list) or len(line) < 4:
+            continue
+        p1 = _vacuum_to_image(
+            line[0], line[1], header, w, h, flip_x, flip_y, rotation, scale,
+        )
+        p2 = _vacuum_to_image(
+            line[2], line[3], header, w, h, flip_x, flip_y, rotation, scale,
+        )
+        result.append({
+            "x1": p1[0], "y1": p1[1],
+            "x2": p2[0], "y2": p2[1],
+            "vacuum_coords": line[:4],
+        })
+    return result
+
+
+def _transform_ramps(
+    vws: dict[str, Any],
+    header: MapHeader,
+    w: int,
+    h: int,
+    flip_x: bool,
+    flip_y: bool,
+    rotation: int,
+    scale: int,
+) -> list[dict[str, Any]]:
+    """Transform ramp areas (vws.ramp) to image coordinates.
+
+    Each ramp entry is [x1, y1, x2, y2, type] where the coords define a
+    rectangular area and type indicates the ramp kind.
+    """
+    ramps = vws.get("ramp", [])
+    if not ramps:
+        return []
+
+    result = []
+    for ramp in ramps:
+        if not isinstance(ramp, list) or len(ramp) < 4:
+            continue
+        # Transform the two corners that define the rectangle
+        p1 = _vacuum_to_image(
+            ramp[0], ramp[1], header, w, h, flip_x, flip_y, rotation, scale,
+        )
+        p2 = _vacuum_to_image(
+            ramp[2], ramp[3], header, w, h, flip_x, flip_y, rotation, scale,
+        )
+        x1 = min(p1[0], p2[0])
+        y1 = min(p1[1], p2[1])
+        x2 = max(p1[0], p2[0])
+        y2 = max(p1[1], p2[1])
+        result.append({
+            "points": [
+                {"x": x1, "y": y1},
+                {"x": x2, "y": y1},
+                {"x": x2, "y": y2},
+                {"x": x1, "y": y2},
+            ],
+            "type": ramp[4] if len(ramp) > 4 else 0,
+            "vacuum_coords": ramp[:4],
+        })
+    return result
+
+
 def _transform_furniture(
     metadata: dict[str, Any],
     header: MapHeader,
@@ -512,6 +594,49 @@ def _transform_furniture(
             "center_y": (min(ys) + max(ys)) // 2,
         })
     return result
+
+
+def _decode_rism_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Decode the ``rism`` (saved map) blob and return its JSON metadata.
+
+    The live map frame often omits zone configuration (vw, vws).  The
+    saved map embedded in ``rism`` contains the authoritative copy of
+    these settings.  Returns an empty dict if rism is absent or invalid.
+
+    Decode pipeline: URL-safe base64 -> zlib decompress -> skip 27-byte
+    header + pixel grid -> parse trailing JSON.
+    """
+    import base64 as _b64
+    import struct as _struct
+    import zlib as _zlib
+
+    rism = metadata.get("rism")
+    if not rism or not isinstance(rism, str):
+        return {}
+    try:
+        # URL-safe base64 decode
+        b64 = rism.replace("-", "+").replace("_", "/")
+        pad = 4 - (len(b64) % 4)
+        if pad != 4:
+            b64 += "=" * pad
+        decoded = _b64.b64decode(b64)
+        decompressed = _zlib.decompress(decoded)
+
+        # Skip 27-byte header, then width*height pixel bytes
+        hdr_fmt = "<2hb11h"
+        hdr_size = _struct.calcsize(hdr_fmt)  # 27
+        if len(decompressed) < hdr_size:
+            return {}
+        vals = _struct.unpack_from(hdr_fmt, decompressed)
+        width, height = vals[10], vals[11]
+        pixel_end = hdr_size + width * height
+        if len(decompressed) <= pixel_end:
+            return {}
+
+        return dict(json.loads(decompressed[pixel_end:]))
+    except Exception:
+        _LOGGER.debug("Failed to decode rism saved map", exc_info=True)
+        return {}
 
 
 def _render_map(
@@ -643,5 +768,53 @@ def _render_map(
             flip_x, flip_y, rotation, scale,
         ),
     }
+
+    # Thresholds (vws key): passable, impassable, ramps, cliffs
+    # DEBUG: expose raw vws data as attribute for investigation
+    # The live map frame (req_type=1) often lacks zone config data like
+    # vws (thresholds) and vw (no-go/virtual walls).  This data lives in
+    # the saved map embedded in the "rism" metadata key.  Decode it to
+    # get the authoritative zone configuration.
+    saved_meta = _decode_rism_metadata(map_data.raw_metadata)
+
+    # Merge saved-map zones into live map attributes.  The live map's
+    # vw/vws take precedence if present; fall back to saved map data.
+    effective_meta = map_data.raw_metadata
+    if saved_meta:
+        for zone_key in ("vw", "vws"):
+            if not effective_meta.get(zone_key) and saved_meta.get(zone_key):
+                effective_meta = {**effective_meta, zone_key: saved_meta[zone_key]}
+
+    # Re-compute no-go zones and virtual walls from merged metadata
+    attrs["no_go_zones"] = _transform_no_go_zones(
+        effective_meta, header, w, h, flip_x, flip_y, rotation, scale,
+    )
+    attrs["virtual_walls"] = _transform_virtual_walls(
+        effective_meta, header, w, h, flip_x, flip_y, rotation, scale,
+    )
+
+    transform_args = (header, w, h, flip_x, flip_y, rotation, scale)
+
+    # Thresholds from vws: passable (vwsl), impassable (npthrsd), ramps
+    vws = effective_meta.get("vws", {})
+    if isinstance(vws, dict) and vws:
+        has_impassable = bool(vws.get("npthrsd"))
+        attrs["passable_thresholds"] = _transform_threshold_lines(
+            vws, "vwsl", *transform_args,
+        )
+        attrs["impassable_thresholds"] = _transform_threshold_lines(
+            vws, "npthrsd", *transform_args,
+        ) if has_impassable else []
+        attrs["ramps"] = _transform_ramps(vws, *transform_args)
+
+    # Cliffs live under vw.cliff, not vws
+    vw = effective_meta.get("vw", {})
+    if isinstance(vw, dict):
+        cliff_lines = vw.get("cliff", [])
+        if cliff_lines:
+            # Wrap in a dict so _transform_threshold_lines can extract the sub-key
+            attrs["cliffs"] = _transform_threshold_lines(
+                {"cliff": cliff_lines}, "cliff", *transform_args,
+            )
 
     return buf.getvalue(), attrs

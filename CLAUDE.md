@@ -44,22 +44,36 @@ The trailing JSON contains these zone-related keys:
 - `type`: 0 = auto-detected by robot, 1 = manually added by user. Affects outline color only.
 - `roi`: 8 ints = 4 corners [x1,y1, x2,y2, x3,y3, x4,y4] in vacuum coords
 
-### Keys NOT present in current metadata
+### Keys NOT present in live map frame metadata
 
-The Tasshack/dreame-vacuum upstream uses these keys for other models, but they do not appear in the X50 Ultra Complete map data:
+These keys are absent from the live map frame (req_type=1) but some exist in the `rism` saved map blob:
 
-- `vw` (the key itself is absent; no virtual walls or no-go zones configured)
-- `vws.vwsl` / `vws.npthrsd` / `vws.ramp` / `vws.cliff` (thresholds, ramps, cliffs)
-- `cpt.addcpt` / `cpt.nocpt` (manual carpet zones)
-- `carpet_polygon` / `carpet_info` (auto-detected carpet polygons)
+- `vw` — absent in live frame; present in `rism` with `line`, `rect`, `cliff` sub-keys
+- `vws` — absent in live frame; present in `rism` with `vwsl` (3 passable thresholds on this device)
+- `cpt.addcpt` / `cpt.nocpt` (manual carpet zones) — not found anywhere
+- `carpet_polygon` / `carpet_info` (auto-detected carpet polygons) — not found anywhere
 
-### Passable thresholds investigation (2026-04-04)
+### Saved map blob (`rism` key)
 
-The Dreame app shows "Passable Thresholds" as green hatched zones, but this data does **not** exist in the MIoT map protocol:
-- Not in `req_type=1` (current map): all 51 metadata keys inspected, none threshold-related
-- Not in `req_type=2` (saved map): returns empty `object_name`, no saved map on this device
-- Not in Tasshack's codebase: `npthrsd` and `passable` terms don't appear anywhere
-- Likely managed through a separate Dreame app API outside the MIoT protocol, or stored in firmware-only settings not exposed to the map endpoint
+The live map frame (req_type=1) omits zone configuration (virtual walls, no-go zones, thresholds). This data lives inside the `rism` key — an embedded saved map blob:
+
+- **Encoding**: URL-safe base64 → zlib decompress → same binary format (27-byte header + pixels + trailing JSON)
+- **Contains**: `vw` (virtual walls, no-go zones, cliffs), `vws` (passable/impassable thresholds, ramps), `sneak_areas` (low-clearance zones)
+- `camera.py` decodes `rism` and merges its zone data when the live frame lacks it
+
+### Zone configuration data locations
+
+| Data | Key | Location |
+|------|-----|----------|
+| Passable thresholds | `vws.vwsl` | `rism` saved map metadata |
+| Impassable thresholds | `vws.npthrsd` | `rism` saved map metadata |
+| Ramps | `vws.ramp` | `rism` saved map metadata |
+| Cliffs | `vw.cliff` | `rism` saved map metadata (inside `vw`, not `vws`) |
+| Virtual walls | `vw.line` | `rism` saved map metadata |
+| No-go zones | `vw.rect` | `rism` saved map metadata |
+| Low-clearance zones | `sneak_areas` | Both live frame and `rism` |
+
+Note: `vw.rect` no-go zones in the saved map use a 5-value format `[x1,y1,x2,y2,flag]` (2 corners + flag), unlike the live map's 8-value format `[x1,y1,...x4,y4]` (4 corners). The renderer currently only handles the 8-value format.
 
 Carpet detection on this model is pixel-level only (0x40 bitmask), not metadata-based.
 
