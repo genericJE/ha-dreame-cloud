@@ -1397,14 +1397,74 @@ class DreameVacuumMapCard extends HTMLElement {
         cliff: this._editCliffs.map((t) => t.vacuum_coords),
       };
 
+      const sentCounts = {
+        passable: serviceData.thresholds.vwsl.length,
+        impassable: serviceData.thresholds.npthrsd.length,
+        ramp: serviceData.thresholds.ramp.length,
+        cliff: serviceData.thresholds.cliff.length,
+        no_go: serviceData.no_go_zones.length,
+        wall: serviceData.virtual_walls.length,
+        low_clearance: serviceData.low_clearance_zones.length,
+      };
       await this._hass.callService("dreame_cloud", "update_map", serviceData);
       this._mode = "all";
       DreameVacuumMapCard._persistedMode = "all";
       this._exitEditMode();
       this._updateContent();
+
+      // Check if the vacuum rejected any zones after the map refreshes
+      setTimeout(() => {
+        this._checkSaveResult(sentCounts);
+      }, 4000);
     } catch (err) {
       console.error("Failed to save map edits:", err);
+      this._showToast("Save failed: " + err.message);
     }
+  }
+
+  _checkSaveResult(sentCounts) {
+    if (!this._hass) return;
+    const camera = this._hass.states[this._entities.camera];
+    if (!camera) return;
+    const a = camera.attributes;
+    const attrMap = {
+      passable: "passable_thresholds",
+      impassable: "impassable_thresholds",
+      ramp: "ramps",
+      cliff: "cliffs",
+      no_go: "no_go_zones",
+      wall: "virtual_walls",
+      low_clearance: "low_clearance_zones",
+    };
+    const rejected = [];
+    for (const [key, sent] of Object.entries(sentCounts)) {
+      if (!sent) continue;
+      const got = (a[attrMap[key]] || []).length;
+      if (got < sent) {
+        rejected.push(`${sent - got} ${key}`);
+      }
+    }
+    if (rejected.length) {
+      this._showToast(`Vacuum rejected ${rejected.join(", ")}. Zones may need to be at valid doorways.`);
+    }
+  }
+
+  _showToast(message) {
+    const card = this.shadowRoot?.querySelector("ha-card");
+    if (!card) return;
+    let toast = card.querySelector(".map-toast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.className = "map-toast";
+      card.querySelector(".card-content")?.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.style.display = "block";
+    toast.style.opacity = "1";
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      setTimeout(() => { toast.style.display = "none"; }, 500);
+    }, 5000);
   }
 
   _updateSettingsPanel(card) {
@@ -1887,6 +1947,23 @@ class DreameVacuumMapCard extends HTMLElement {
       }
       .action-btn.primary:active {
         transform: scale(0.98);
+      }
+      .map-toast {
+        display: none;
+        position: fixed;
+        bottom: 40px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #d32f2f;
+        color: white;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 13px;
+        z-index: 1000;
+        max-width: 90%;
+        text-align: center;
+        transition: opacity 0.5s;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
       }
       .action-btn.secondary {
         background: var(--surface);
