@@ -632,6 +632,10 @@ def _transform_furniture(
             "h": max(ys) - min(ys),
             "center_x": (min(xs) + max(xs)) // 2,
             "center_y": (min(ys) + max(ys)) // 2,
+            "vacuum_cx": cx,
+            "vacuum_cy": cy,
+            "vacuum_w": fw,
+            "vacuum_h": fh,
         })
     return result
 
@@ -787,16 +791,8 @@ def _render_map(
             else None
         ),
         "rooms": room_bboxes,
-        "furniture": _transform_furniture(
-            map_data.raw_metadata, header, w, h, flip_x, flip_y, rotation, scale,
-        ),
         "carpet_zones": _compute_carpet_zones(
             pixel_array, w, h, flip_x, flip_y, rotation, scale,
-        ),
-        # Low-clearance / low-lying areas (sneak_areas in Dreame protocol).
-        "low_clearance_zones": _transform_rect_zones(
-            map_data.raw_metadata, "sneak_areas", header, w, h,
-            flip_x, flip_y, rotation, scale,
         ),
     }
 
@@ -821,11 +817,21 @@ def _render_map(
     # so without this, deletions appear to revert.
     if pending_zone_update:
         effective_meta = dict(effective_meta)
-        for zone_key in ("vw", "vws", "sneak_areas"):
+        for zone_key in ("vw", "vws", "sneak_areas", "ai_furniture_user"):
             if zone_key in pending_zone_update:
                 effective_meta[zone_key] = pending_zone_update[zone_key]
 
     transform_args = (header, w, h, flip_x, flip_y, rotation, scale)
+
+    attrs["furniture"] = _transform_furniture(
+        effective_meta, *transform_args,
+    )
+
+    # Low-clearance zones use effective_meta so pending overlay applies
+    attrs["low_clearance_zones"] = _transform_rect_zones(
+        effective_meta, "sneak_areas", header, w, h,
+        flip_x, flip_y, rotation, scale,
+    )
 
     attrs["no_go_zones"] = _transform_no_go_zones(
         effective_meta, *transform_args,

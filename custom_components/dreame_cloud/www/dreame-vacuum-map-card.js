@@ -50,7 +50,7 @@ class DreameVacuumMapCard extends HTMLElement {
     this._lastEntityPicture = null;
     this._entities = {};
     // Edit mode state
-    this._editTool = "no_go"; // no_go | wall | carpet | low_clearance | threshold | impassable | ramp | cliff
+    this._editTool = "no_go"; // no_go | wall | carpet | low_clearance | threshold | impassable | ramp | cliff | furniture
     this._editNoGoZones = [];
     this._editVirtualWalls = [];
     this._editCarpetZones = [];
@@ -59,6 +59,16 @@ class DreameVacuumMapCard extends HTMLElement {
     this._editImpassableThresholds = [];
     this._editRamps = [];
     this._editCliffs = [];
+    this._editFurniture = [];
+    this._selectedFurnitureIdx = -1;
+    this._furnitureDragAction = null; // null | "move" | "resize-tl" | "resize-tr" | "resize-bl" | "resize-br"
+    this._furnitureDragStart = null; // {x, y, origItem: {...}}
+    this._furniturePickerOpen = false;
+    this._furniturePlacePoint = null; // {x, y} SVG coords where new item goes
+    // Zone selection/move/resize state (for rect tools: no_go, carpet, low_clearance, ramp)
+    this._selectedZoneIdx = -1;
+    this._zoneDragAction = null; // null | "move" | "resize-tl" | "resize-tr" | "resize-bl" | "resize-br"
+    this._zoneDragStart = null; // {x, y, origPoints: [...], origBBox: {x,y,w,h}}
     this._editDirty = false;
     this._drawingWall = null; // {x1, y1, x2, y2} during wall drawing
     this._drawingRect = null; // {x1, y1, x2, y2} during rect drawing (no-go, carpet, low-clearance)
@@ -383,23 +393,45 @@ class DreameVacuumMapCard extends HTMLElement {
       }
     }
 
-    // Zone type rendering config: [editArray, attrKey, fill, stroke]
+    // Zone type rendering config: [editArray, attrKey, fill, stroke, toolId]
     const _zoneStyles = [
-      [this._editNoGoZones, "no_go_zones", "rgba(244,67,54,0.2)", "#f44336"],
-      [this._editCarpetZones, "carpet_zones", "rgba(156,39,176,0.2)", "#9c27b0"],
-      [this._editLowClearanceZones, "low_clearance_zones", "rgba(33,150,243,0.2)", "#2196f3"],
+      [this._editNoGoZones, "no_go_zones", "rgba(244,67,54,0.2)", "#f44336", "no_go"],
+      [this._editCarpetZones, "carpet_zones", "rgba(156,39,176,0.2)", "#9c27b0", "carpet"],
+      [this._editLowClearanceZones, "low_clearance_zones", "rgba(33,150,243,0.2)", "#2196f3", "low_clearance"],
     ];
-    for (const [editZones, attrKey, fill, stroke] of _zoneStyles) {
+    for (const [editZones, attrKey, fill, stroke, toolId] of _zoneStyles) {
       const zones = this._mode === "edit" ? editZones : (camera.attributes[attrKey] || []);
-      for (const zone of zones) {
+      for (let zi = 0; zi < zones.length; zi++) {
+        const zone = zones[zi];
         if (!zone.points || zone.points.length !== 4) continue;
+        const isSelectedZone = this._mode === "edit" && this._editTool === toolId
+          && zi === this._selectedZoneIdx;
         const pts = zone.points.map((p) => `${p.x},${p.y}`).join(" ");
         svgContent += `
           <polygon points="${pts}"
-            fill="${fill}" stroke="${stroke}" stroke-width="2"
+            fill="${isSelectedZone ? "rgba(255,193,7,0.25)" : fill}"
+            stroke="${isSelectedZone ? "#ffc107" : stroke}"
+            stroke-width="${isSelectedZone ? 3 : 2}"
             stroke-dasharray="6 3"
             style="${this._mode === "edit" ? "cursor:pointer" : ""}" />
         `;
+        if (isSelectedZone) {
+          const bb = this._zoneBBox(zone);
+          if (bb) {
+            const hs = 5;
+            const corners = [
+              [bb.x, bb.y], [bb.x + bb.w, bb.y],
+              [bb.x, bb.y + bb.h], [bb.x + bb.w, bb.y + bb.h],
+            ];
+            for (const [hx, hy] of corners) {
+              svgContent += `
+                <rect x="${hx - hs}" y="${hy - hs}" width="${hs * 2}" height="${hs * 2}"
+                  fill="#ffc107" stroke="#fff" stroke-width="1" rx="1"
+                  style="cursor:nwse-resize" />
+              `;
+            }
+          }
+        }
       }
     }
 
@@ -470,15 +502,37 @@ class DreameVacuumMapCard extends HTMLElement {
     const ramps = this._mode === "edit"
       ? this._editRamps
       : (camera.attributes.ramps || []);
-    for (const ramp of ramps) {
+    for (let ri = 0; ri < ramps.length; ri++) {
+      const ramp = ramps[ri];
       if (!ramp.points || ramp.points.length !== 4) continue;
+      const isSelectedRamp = this._mode === "edit" && this._editTool === "ramp"
+        && ri === this._selectedZoneIdx;
       const pts = ramp.points.map((p) => `${p.x},${p.y}`).join(" ");
       svgContent += `
         <polygon points="${pts}"
-          fill="rgba(255,152,0,0.2)" stroke="#ff9800" stroke-width="2"
+          fill="${isSelectedRamp ? "rgba(255,193,7,0.25)" : "rgba(255,152,0,0.2)"}"
+          stroke="${isSelectedRamp ? "#ffc107" : "#ff9800"}"
+          stroke-width="${isSelectedRamp ? 3 : 2}"
           stroke-dasharray="6 3"
           style="${this._mode === "edit" ? "cursor:pointer" : ""}" />
       `;
+      if (isSelectedRamp) {
+        const bb = this._zoneBBox(ramp);
+        if (bb) {
+          const hs = 5;
+          const corners = [
+            [bb.x, bb.y], [bb.x + bb.w, bb.y],
+            [bb.x, bb.y + bb.h], [bb.x + bb.w, bb.y + bb.h],
+          ];
+          for (const [hx, hy] of corners) {
+            svgContent += `
+              <rect x="${hx - hs}" y="${hy - hs}" width="${hs * 2}" height="${hs * 2}"
+                fill="#ffc107" stroke="#fff" stroke-width="1" rx="1"
+                style="cursor:nwse-resize" />
+            `;
+          }
+        }
+      }
     }
 
     // Drawing preview for line tools (wall, threshold, impassable, cliff)
@@ -496,20 +550,46 @@ class DreameVacuumMapCard extends HTMLElement {
     }
 
     // Furniture
-    const furniture = camera.attributes.furniture || [];
-    for (const item of furniture) {
+    const furnitureItems = (this._mode === "edit" && this._editTool === "furniture")
+      ? this._editFurniture
+      : (camera.attributes.furniture || []);
+    for (let fi = 0; fi < furnitureItems.length; fi++) {
+      const item = furnitureItems[fi];
+      const isSelected = this._mode === "edit" && this._editTool === "furniture"
+        && fi === this._selectedFurnitureIdx;
+      const strokeColor = isSelected ? "#ffc107" : "rgba(158, 158, 158, 0.5)";
+      const fillColor = isSelected ? "rgba(255, 193, 7, 0.15)" : "rgba(158, 158, 158, 0.15)";
+      const strokeWidth = isSelected ? 2 : 1;
       svgContent += `
         <rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}"
-          fill="rgba(158, 158, 158, 0.15)" stroke="rgba(158, 158, 158, 0.5)"
-          stroke-width="1" stroke-dasharray="4 2" rx="2" />
-        <text x="${item.center_x}" y="${item.center_y}"
+          fill="${fillColor}" stroke="${strokeColor}"
+          stroke-width="${strokeWidth}" stroke-dasharray="4 2" rx="2"
+          style="${this._mode === "edit" && this._editTool === "furniture" ? "cursor:pointer" : ""}" />
+        <text x="${item.x + item.w / 2}" y="${item.y + item.h / 2}"
           text-anchor="middle" dominant-baseline="middle"
           fill="rgba(255,255,255,0.6)" font-size="9"
-          font-family="system-ui, sans-serif"
+          font-family="system-ui, sans-serif" pointer-events="none"
           paint-order="stroke" stroke="rgba(0,0,0,0.4)" stroke-width="2">
           ${item.name}
         </text>
       `;
+      // Resize handles for selected furniture
+      if (isSelected) {
+        const hs = 5;
+        const corners = [
+          [item.x, item.y],
+          [item.x + item.w, item.y],
+          [item.x, item.y + item.h],
+          [item.x + item.w, item.y + item.h],
+        ];
+        for (const [hx, hy] of corners) {
+          svgContent += `
+            <rect x="${hx - hs}" y="${hy - hs}" width="${hs * 2}" height="${hs * 2}"
+              fill="#ffc107" stroke="#fff" stroke-width="1" rx="1"
+              style="cursor:nwse-resize" />
+          `;
+        }
+      }
     }
 
     // SVG defs for gradients/filters (only add once)
@@ -659,12 +739,82 @@ class DreameVacuumMapCard extends HTMLElement {
 
     if (this._mode === "edit") {
       this._pointerStart = { x: pt.x, y: pt.y };
+
+      if (this._editTool === "furniture") {
+        // Check if pointer is on a resize handle of the selected item
+        const handle = this._furnitureHandleHitTest(pt.x, pt.y);
+        if (handle) {
+          this._furnitureDragAction = handle;
+          this._furnitureDragStart = {
+            x: pt.x, y: pt.y,
+            origItem: { ...this._editFurniture[this._selectedFurnitureIdx] },
+          };
+          this._drawing = true;
+          svg.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          return;
+        }
+        // Check if pointer is on a furniture item (move)
+        const hitIdx = this._furnitureHitTest(pt.x, pt.y);
+        if (hitIdx >= 0) {
+          this._selectedFurnitureIdx = hitIdx;
+          this._furnitureDragAction = "move";
+          this._furnitureDragStart = {
+            x: pt.x, y: pt.y,
+            origItem: { ...this._editFurniture[hitIdx] },
+          };
+          this._drawing = true;
+          svg.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          this._updateContent();
+          return;
+        }
+        // Tap on empty space will be handled in pointerUp (open picker or deselect)
+        svg.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
+
       const lineTools = ["wall", "threshold", "impassable", "cliff"];
       if (lineTools.includes(this._editTool)) {
         this._drawing = true;
         this._drawingWall = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
       } else {
-        // All rect-based tools: no_go, carpet, low_clearance, ramp
+        // Rect-based tools: no_go, carpet, low_clearance, ramp
+        // Check for resize handle on selected zone
+        const zHandle = this._zoneHandleHitTest(pt.x, pt.y);
+        if (zHandle) {
+          const zone = this._getEditZonesForTool()[this._selectedZoneIdx];
+          this._zoneDragAction = zHandle;
+          this._zoneDragStart = {
+            x: pt.x, y: pt.y,
+            origPoints: zone.points.map((p) => ({ ...p })),
+            origBBox: this._zoneBBox(zone),
+          };
+          this._drawing = true;
+          svg.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          return;
+        }
+        // Check for hit on existing zone (start move)
+        const zHitIdx = this._zoneHitTest(pt.x, pt.y);
+        if (zHitIdx >= 0) {
+          this._selectedZoneIdx = zHitIdx;
+          const zone = this._getEditZonesForTool()[zHitIdx];
+          this._zoneDragAction = "move";
+          this._zoneDragStart = {
+            x: pt.x, y: pt.y,
+            origPoints: zone.points.map((p) => ({ ...p })),
+            origBBox: this._zoneBBox(zone),
+          };
+          this._drawing = true;
+          svg.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          this._updateContent();
+          return;
+        }
+        // Empty space: start drawing new rect
+        this._selectedZoneIdx = -1;
         this._drawing = true;
         this._drawingRect = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
       }
@@ -686,7 +836,50 @@ class DreameVacuumMapCard extends HTMLElement {
     }
 
     if (this._mode === "edit" && this._drawing) {
-      if (this._drawingRect) {
+      if (this._editTool === "furniture" && this._furnitureDragAction && this._furnitureDragStart) {
+        const f = this._editFurniture[this._selectedFurnitureIdx];
+        const orig = this._furnitureDragStart.origItem;
+        const dx = pt.x - this._furnitureDragStart.x;
+        const dy = pt.y - this._furnitureDragStart.y;
+        if (this._furnitureDragAction === "move") {
+          f.x = orig.x + dx;
+          f.y = orig.y + dy;
+          f.center_x = orig.center_x + dx;
+          f.center_y = orig.center_y + dy;
+        } else {
+          // Resize: adjust the appropriate corner while keeping min size
+          const minSize = 10;
+          if (this._furnitureDragAction === "resize-br") {
+            f.w = Math.max(minSize, orig.w + dx);
+            f.h = Math.max(minSize, orig.h + dy);
+          } else if (this._furnitureDragAction === "resize-bl") {
+            const newW = Math.max(minSize, orig.w - dx);
+            f.x = orig.x + orig.w - newW;
+            f.w = newW;
+            f.h = Math.max(minSize, orig.h + dy);
+          } else if (this._furnitureDragAction === "resize-tr") {
+            f.w = Math.max(minSize, orig.w + dx);
+            const newH = Math.max(minSize, orig.h - dy);
+            f.y = orig.y + orig.h - newH;
+            f.h = newH;
+          } else if (this._furnitureDragAction === "resize-tl") {
+            const newW = Math.max(minSize, orig.w - dx);
+            const newH = Math.max(minSize, orig.h - dy);
+            f.x = orig.x + orig.w - newW;
+            f.y = orig.y + orig.h - newH;
+            f.w = newW;
+            f.h = newH;
+          }
+          f.center_x = f.x + f.w / 2;
+          f.center_y = f.y + f.h / 2;
+        }
+        this._updateMap(this.shadowRoot.querySelector("ha-card"));
+        e.preventDefault();
+      } else if (this._zoneDragAction && this._zoneDragStart) {
+        this._applyZoneDrag(pt);
+        this._updateMap(this.shadowRoot.querySelector("ha-card"));
+        e.preventDefault();
+      } else if (this._drawingRect) {
         this._drawingRect.x2 = pt.x;
         this._drawingRect.y2 = pt.y;
         this._updateMap(this.shadowRoot.querySelector("ha-card"));
@@ -716,6 +909,65 @@ class DreameVacuumMapCard extends HTMLElement {
       return;
     }
 
+    // Furniture tool: handle drag-end and taps separately from zone tools
+    if (this._mode === "edit" && this._editTool === "furniture") {
+      const pt = this._getSvgCoords(e);
+      const start = this._pointerStart;
+      const tapDist = start && pt ? Math.hypot(pt.x - start.x, pt.y - start.y) : Infinity;
+      const isTap = tapDist < 8;
+
+      if (this._drawing && this._furnitureDragAction) {
+        // End of drag (move or resize)
+        this._drawing = false;
+        if (!isTap) {
+          // Recompute vacuum coords from new image position
+          const f = this._editFurniture[this._selectedFurnitureIdx];
+          if (f) {
+            const [vcx, vcy] = this._imageToVacuumCoords(f.center_x, f.center_y);
+            // Compute vacuum dimensions from two edge points
+            const [vlx, vly] = this._imageToVacuumCoords(f.x, f.y);
+            const [vrx, vry] = this._imageToVacuumCoords(f.x + f.w, f.y + f.h);
+            f.vacuum_cx = vcx;
+            f.vacuum_cy = vcy;
+            f.vacuum_w = Math.abs(vrx - vlx);
+            f.vacuum_h = Math.abs(vry - vly);
+          }
+          this._editDirty = true;
+        }
+        this._furnitureDragAction = null;
+        this._furnitureDragStart = null;
+        this._pointerStart = null;
+        this._updateContent();
+        e.preventDefault();
+        return;
+      }
+
+      // Tap handling
+      if (isTap && pt) {
+        const hitIdx = this._furnitureHitTest(pt.x, pt.y);
+        if (hitIdx >= 0) {
+          // Select the tapped item
+          this._selectedFurnitureIdx = hitIdx;
+        } else {
+          // Tap on empty space: deselect or open picker
+          if (this._selectedFurnitureIdx >= 0) {
+            this._selectedFurnitureIdx = -1;
+          } else {
+            // Open the type picker to add new furniture here
+            this._furniturePlacePoint = { x: pt.x, y: pt.y };
+            this._furniturePickerOpen = true;
+          }
+        }
+      }
+      this._drawing = false;
+      this._furnitureDragAction = null;
+      this._furnitureDragStart = null;
+      this._pointerStart = null;
+      this._updateContent();
+      e.preventDefault();
+      return;
+    }
+
     if (!this._drawing) return;
     this._drawing = false;
 
@@ -736,14 +988,47 @@ class DreameVacuumMapCard extends HTMLElement {
       const start = this._pointerStart;
       const tapDist = start && pt ? Math.hypot(pt.x - start.x, pt.y - start.y) : Infinity;
       const isTap = tapDist < 8;
+      const rectTools = ["no_go", "carpet", "low_clearance", "ramp"];
+      const isRectTool = rectTools.includes(this._editTool);
+
+      // Zone drag end (move/resize) for rect tools
+      if (isRectTool && this._zoneDragAction && this._zoneDragStart) {
+        if (!isTap) {
+          this._applyZoneDrag(pt);
+          this._finalizeZoneDrag();
+        } else {
+          // Restore original points (was a tap, not a real drag)
+          const zones = this._getEditZonesForTool();
+          const zone = zones[this._selectedZoneIdx];
+          if (zone) {
+            zone.points = this._zoneDragStart.origPoints;
+          }
+        }
+        this._zoneDragAction = null;
+        this._zoneDragStart = null;
+        this._pointerStart = null;
+        this._updateContent();
+        e.preventDefault();
+        return;
+      }
 
       if (isTap) {
-        // Tap: try to delete an existing zone or wall under the pointer
         this._drawingRect = null;
         this._drawingWall = null;
-        const deleted = this._tryDeleteAtPoint(pt.x, pt.y);
-        if (deleted) {
-          this._editDirty = true;
+        if (isRectTool) {
+          // Rect tools: tap to select/deselect zones
+          const hitIdx = this._zoneHitTest(pt.x, pt.y);
+          if (hitIdx >= 0) {
+            this._selectedZoneIdx = hitIdx;
+          } else {
+            this._selectedZoneIdx = -1;
+          }
+        } else {
+          // Line tools: tap to delete
+          const deleted = this._tryDeleteAtPoint(pt.x, pt.y);
+          if (deleted) {
+            this._editDirty = true;
+          }
         }
       } else if (this._drawingRect) {
         const d = this._drawingRect;
@@ -771,6 +1056,7 @@ class DreameVacuumMapCard extends HTMLElement {
             newZone.type = 0;
           }
           this._getEditZonesForTool().push(newZone);
+          this._selectedZoneIdx = this._getEditZonesForTool().length - 1;
           this._editDirty = true;
         }
         this._drawingRect = null;
@@ -817,27 +1103,7 @@ class DreameVacuumMapCard extends HTMLElement {
   }
 
   _tryDeleteAtPoint(px, py) {
-    // Check all rect zone types
-    const allRectZones = [
-      this._editNoGoZones,
-      this._editCarpetZones,
-      this._editLowClearanceZones,
-      this._editRamps,
-    ];
-    for (const zones of allRectZones) {
-      for (let i = zones.length - 1; i >= 0; i--) {
-        const zone = zones[i];
-        if (!zone.points || zone.points.length < 3) continue;
-        const xs = zone.points.map((p) => p.x);
-        const ys = zone.points.map((p) => p.y);
-        const minX = Math.min(...xs), maxX = Math.max(...xs);
-        const minY = Math.min(...ys), maxY = Math.max(...ys);
-        if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
-          zones.splice(i, 1);
-          return true;
-        }
-      }
-    }
+    // Only check line types (rect zones use select+delete instead of tap-to-delete)
     // Check all line types (virtual walls, thresholds, cliffs)
     const allLineArrays = [
       this._editVirtualWalls,
@@ -868,6 +1134,248 @@ class DreameVacuumMapCard extends HTMLElement {
     return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
   }
 
+  // ── Furniture editing ──────────────────────────────────────────────
+
+  static get FURNITURE_TYPES() {
+    return {
+      1: { name: "Single Bed", w: 2000, h: 1000 },
+      2: { name: "Double Bed", w: 2000, h: 1600 },
+      3: { name: "Armchair", w: 800, h: 800 },
+      4: { name: "Two Seat Sofa", w: 1400, h: 800 },
+      5: { name: "Three Seat Sofa", w: 2000, h: 800 },
+      6: { name: "Dining Table", w: 1200, h: 800 },
+      7: { name: "Nightstand", w: 500, h: 500 },
+      8: { name: "Coffee Table", w: 1000, h: 500 },
+      9: { name: "Toilet", w: 400, h: 600 },
+      10: { name: "Litter Box", w: 500, h: 400 },
+      11: { name: "Pet Bed", w: 600, h: 500 },
+      12: { name: "Food Bowl", w: 300, h: 300 },
+      13: { name: "Pet Toilet", w: 500, h: 400 },
+      14: { name: "Refrigerator", w: 600, h: 700 },
+      15: { name: "Washing Machine", w: 600, h: 600 },
+      16: { name: "Enclosed Litter Box", w: 500, h: 500 },
+      17: { name: "Air Conditioner", w: 800, h: 300 },
+      18: { name: "TV Cabinet", w: 1600, h: 400 },
+      19: { name: "Bookshelf", w: 800, h: 400 },
+      20: { name: "Shoe Cabinet", w: 800, h: 400 },
+      21: { name: "Wardrobe", w: 1600, h: 600 },
+      22: { name: "Greenery", w: 400, h: 400 },
+      23: { name: "Floor Mirror", w: 400, h: 300 },
+      24: { name: "L-Shaped Sofa", w: 2400, h: 1600 },
+      25: { name: "Round Coffee Table", w: 600, h: 600 },
+      26: { name: "Table", w: 1000, h: 800 },
+    };
+  }
+
+  _renderFurniturePicker() {
+    const types = DreameVacuumMapCard.FURNITURE_TYPES;
+    const buttons = Object.entries(types).map(([id, info]) =>
+      `<button class="furniture-type-btn" data-type="${id}">${info.name}</button>`
+    ).join("");
+    return `
+      <div class="furniture-picker">
+        <div class="furniture-picker-title">Select furniture type:</div>
+        <div class="furniture-picker-grid">${buttons}</div>
+        <button class="furniture-picker-cancel">Cancel</button>
+      </div>
+    `;
+  }
+
+  _furnitureHitTest(px, py) {
+    // Returns index of furniture item at point, or -1. Tests in reverse order (top-most first).
+    for (let i = this._editFurniture.length - 1; i >= 0; i--) {
+      const f = this._editFurniture[i];
+      if (px >= f.x && px <= f.x + f.w && py >= f.y && py <= f.y + f.h) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  _furnitureHandleHitTest(px, py) {
+    if (this._selectedFurnitureIdx < 0) return null;
+    const f = this._editFurniture[this._selectedFurnitureIdx];
+    if (!f) return null;
+    const hs = 8; // handle size (half)
+    const corners = {
+      "resize-tl": { x: f.x, y: f.y },
+      "resize-tr": { x: f.x + f.w, y: f.y },
+      "resize-bl": { x: f.x, y: f.y + f.h },
+      "resize-br": { x: f.x + f.w, y: f.y + f.h },
+    };
+    for (const [action, pt] of Object.entries(corners)) {
+      if (Math.abs(px - pt.x) <= hs && Math.abs(py - pt.y) <= hs) {
+        return action;
+      }
+    }
+    return null;
+  }
+
+  _deleteFurniture() {
+    if (this._selectedFurnitureIdx >= 0) {
+      this._editFurniture.splice(this._selectedFurnitureIdx, 1);
+      this._selectedFurnitureIdx = -1;
+      this._editDirty = true;
+      this._updateContent();
+    }
+  }
+
+  _addFurniture(typeId) {
+    const typeInfo = DreameVacuumMapCard.FURNITURE_TYPES[typeId];
+    if (!typeInfo || !this._furniturePlacePoint) return;
+    const pt = this._furniturePlacePoint;
+
+    // Convert default vacuum dimensions to image dimensions
+    const camera = this._getState(this._entities.map);
+    const attrs = camera?.attributes || {};
+    const scale = attrs.scale || 1;
+    const pixelSize = attrs.pixel_size || 50;
+    const imgW = (typeInfo.w / pixelSize) * scale;
+    const imgH = (typeInfo.h / pixelSize) * scale;
+
+    // Convert placement point to vacuum coords for vacuum_cx/cy
+    const [vcx, vcy] = this._imageToVacuumCoords(pt.x, pt.y);
+
+    const newItem = {
+      type: typeId,
+      name: typeInfo.name,
+      x: pt.x - imgW / 2,
+      y: pt.y - imgH / 2,
+      w: imgW,
+      h: imgH,
+      center_x: pt.x,
+      center_y: pt.y,
+      vacuum_cx: vcx,
+      vacuum_cy: vcy,
+      vacuum_w: typeInfo.w,
+      vacuum_h: typeInfo.h,
+    };
+    this._editFurniture.push(newItem);
+    this._selectedFurnitureIdx = this._editFurniture.length - 1;
+    this._furniturePickerOpen = false;
+    this._furniturePlacePoint = null;
+    this._editDirty = true;
+    this._updateContent();
+  }
+
+  // ── Zone editing (rect tools: no_go, carpet, low_clearance, ramp) ──
+
+  _zoneBBox(zone) {
+    if (!zone.points || zone.points.length < 3) return null;
+    const xs = zone.points.map((p) => p.x);
+    const ys = zone.points.map((p) => p.y);
+    return {
+      x: Math.min(...xs), y: Math.min(...ys),
+      w: Math.max(...xs) - Math.min(...xs),
+      h: Math.max(...ys) - Math.min(...ys),
+    };
+  }
+
+  _zoneHitTest(px, py) {
+    const zones = this._getEditZonesForTool();
+    for (let i = zones.length - 1; i >= 0; i--) {
+      const bb = this._zoneBBox(zones[i]);
+      if (bb && px >= bb.x && px <= bb.x + bb.w && py >= bb.y && py <= bb.y + bb.h) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  _zoneHandleHitTest(px, py) {
+    if (this._selectedZoneIdx < 0) return null;
+    const zones = this._getEditZonesForTool();
+    const zone = zones[this._selectedZoneIdx];
+    if (!zone) return null;
+    const bb = this._zoneBBox(zone);
+    if (!bb) return null;
+    const hs = 8;
+    const corners = {
+      "resize-tl": { x: bb.x, y: bb.y },
+      "resize-tr": { x: bb.x + bb.w, y: bb.y },
+      "resize-bl": { x: bb.x, y: bb.y + bb.h },
+      "resize-br": { x: bb.x + bb.w, y: bb.y + bb.h },
+    };
+    for (const [action, pt] of Object.entries(corners)) {
+      if (Math.abs(px - pt.x) <= hs && Math.abs(py - pt.y) <= hs) {
+        return action;
+      }
+    }
+    return null;
+  }
+
+  _deleteSelectedZone() {
+    if (this._selectedZoneIdx >= 0) {
+      const zones = this._getEditZonesForTool();
+      zones.splice(this._selectedZoneIdx, 1);
+      this._selectedZoneIdx = -1;
+      this._editDirty = true;
+      this._updateContent();
+    }
+  }
+
+  _applyZoneDrag(pt) {
+    const zones = this._getEditZonesForTool();
+    const zone = zones[this._selectedZoneIdx];
+    if (!zone || !this._zoneDragStart) return;
+    const dx = pt.x - this._zoneDragStart.x;
+    const dy = pt.y - this._zoneDragStart.y;
+    const orig = this._zoneDragStart.origPoints;
+    const obb = this._zoneDragStart.origBBox;
+
+    if (this._zoneDragAction === "move") {
+      for (let i = 0; i < zone.points.length; i++) {
+        zone.points[i] = { x: orig[i].x + dx, y: orig[i].y + dy };
+      }
+    } else {
+      // Resize: compute new bbox from dragged corner, then remap points
+      let nx = obb.x, ny = obb.y, nw = obb.w, nh = obb.h;
+      const minSize = 10;
+      if (this._zoneDragAction === "resize-br") {
+        nw = Math.max(minSize, obb.w + dx);
+        nh = Math.max(minSize, obb.h + dy);
+      } else if (this._zoneDragAction === "resize-bl") {
+        nw = Math.max(minSize, obb.w - dx);
+        nx = obb.x + obb.w - nw;
+        nh = Math.max(minSize, obb.h + dy);
+      } else if (this._zoneDragAction === "resize-tr") {
+        nw = Math.max(minSize, obb.w + dx);
+        nh = Math.max(minSize, obb.h - dy);
+        ny = obb.y + obb.h - nh;
+      } else if (this._zoneDragAction === "resize-tl") {
+        nw = Math.max(minSize, obb.w - dx);
+        nh = Math.max(minSize, obb.h - dy);
+        nx = obb.x + obb.w - nw;
+        ny = obb.y + obb.h - nh;
+      }
+      zone.points = [
+        { x: nx, y: ny },
+        { x: nx + nw, y: ny },
+        { x: nx + nw, y: ny + nh },
+        { x: nx, y: ny + nh },
+      ];
+    }
+  }
+
+  _finalizeZoneDrag() {
+    const zones = this._getEditZonesForTool();
+    const zone = zones[this._selectedZoneIdx];
+    if (!zone) return;
+    // Recompute vacuum coords from the new image-space points
+    const pts = zone.points;
+    const [vx1, vy1] = this._imageToVacuumCoords(pts[0].x, pts[0].y);
+    const [vx2, vy2] = this._imageToVacuumCoords(pts[1].x, pts[1].y);
+    const [vx3, vy3] = this._imageToVacuumCoords(pts[2].x, pts[2].y);
+    const [vx4, vy4] = this._imageToVacuumCoords(pts[3].x, pts[3].y);
+    zone.roi = [vx1, vy1, vx2, vy2, vx3, vy3, vx4, vy4];
+    if (this._editTool === "ramp") {
+      zone.vacuum_coords = [vx1, vy1, vx3, vy3];
+    }
+    this._editDirty = true;
+    this._zoneDragAction = null;
+    this._zoneDragStart = null;
+  }
+
   _enterEditMode() {
     const camera = this._getState(this._entities.map);
     const a = camera?.attributes || {};
@@ -879,6 +1387,15 @@ class DreameVacuumMapCard extends HTMLElement {
     this._editImpassableThresholds = JSON.parse(JSON.stringify(a.impassable_thresholds || []));
     this._editRamps = JSON.parse(JSON.stringify(a.ramps || []));
     this._editCliffs = JSON.parse(JSON.stringify(a.cliffs || []));
+    this._editFurniture = JSON.parse(JSON.stringify(a.furniture || []));
+    this._selectedFurnitureIdx = -1;
+    this._furnitureDragAction = null;
+    this._furnitureDragStart = null;
+    this._furniturePickerOpen = false;
+    this._furniturePlacePoint = null;
+    this._selectedZoneIdx = -1;
+    this._zoneDragAction = null;
+    this._zoneDragStart = null;
     this._editTool = "no_go";
     this._editDirty = false;
     this._drawingRect = null;
@@ -895,6 +1412,15 @@ class DreameVacuumMapCard extends HTMLElement {
     this._editImpassableThresholds = [];
     this._editRamps = [];
     this._editCliffs = [];
+    this._editFurniture = [];
+    this._selectedFurnitureIdx = -1;
+    this._furnitureDragAction = null;
+    this._furnitureDragStart = null;
+    this._furniturePickerOpen = false;
+    this._furniturePlacePoint = null;
+    this._selectedZoneIdx = -1;
+    this._zoneDragAction = null;
+    this._zoneDragStart = null;
     this._editDirty = false;
     this._drawingRect = null;
     this._drawingWall = null;
@@ -978,16 +1504,18 @@ class DreameVacuumMapCard extends HTMLElement {
         { id: "impassable", icon: "mdi:door-closed-lock", label: "Impass." },
         { id: "ramp", icon: "mdi:slope-uphill", label: "Ramp" },
         { id: "cliff", icon: "mdi:stairs", label: "Cliff" },
+        { id: "furniture", icon: "mdi:sofa", label: "Furniture" },
       ];
       const hints = {
-        no_go: "Draw a rectangle for a no-go zone. Tap an existing zone to delete.",
+        no_go: "Draw to add. Tap to select, drag to move, handles to resize.",
         wall: "Draw a line for a virtual wall. Tap an existing wall to delete.",
-        carpet: "Draw a rectangle to mark a carpet area. Tap to delete.",
-        low_clearance: "Draw a rectangle for a low-clearance area. Tap to delete.",
+        carpet: "Draw to add. Tap to select, drag to move, handles to resize.",
+        low_clearance: "Draw to add. Tap to select, drag to move, handles to resize.",
         threshold: "Draw a line for a passable threshold. Tap to delete.",
         impassable: "Draw a line for an impassable threshold. Tap to delete.",
-        ramp: "Draw a rectangle for a ramp area. Tap to delete.",
+        ramp: "Draw to add. Tap to select, drag to move, handles to resize.",
         cliff: "Draw a line for a cliff edge. Tap to delete.",
+        furniture: "Tap to select. Drag to move, handles to resize. Tap empty space to add.",
       };
       const counts = [
         [this._editNoGoZones.length, "no-go"],
@@ -998,7 +1526,27 @@ class DreameVacuumMapCard extends HTMLElement {
         [this._editImpassableThresholds.length, "impass."],
         [this._editRamps.length, "ramp"],
         [this._editCliffs.length, "cliff"],
+        [this._editFurniture.length, "furniture"],
       ].filter(([c]) => c > 0).map(([c, l]) => `${c} ${l}`).join(" · ");
+
+      // Sub-toolbar: delete button for selected furniture or zone
+      const rectTools = ["no_go", "carpet", "low_clearance", "ramp"];
+      const showZoneDelete = rectTools.includes(this._editTool) && this._selectedZoneIdx >= 0;
+      const showFurnitureDelete = this._editTool === "furniture" && this._selectedFurnitureIdx >= 0;
+      const furnitureActions = (this._editTool === "furniture" || showZoneDelete) ? `
+        <div class="furniture-actions">
+          ${showFurnitureDelete ? `
+            <button class="edit-tool-btn furniture-delete-btn" data-action="furniture-delete">
+              <ha-icon icon="mdi:delete"></ha-icon> Delete
+            </button>
+          ` : ""}
+          ${showZoneDelete ? `
+            <button class="edit-tool-btn furniture-delete-btn" data-action="zone-delete">
+              <ha-icon icon="mdi:delete"></ha-icon> Delete
+            </button>
+          ` : ""}
+        </div>
+      ` : "";
 
       container.innerHTML = `
         <div class="edit-toolbar">
@@ -1010,14 +1558,38 @@ class DreameVacuumMapCard extends HTMLElement {
             `).join("")}
           </div>
           <div class="edit-hint">${hints[this._editTool]}</div>
+          ${furnitureActions}
+          ${this._furniturePickerOpen ? this._renderFurniturePicker() : ""}
           ${counts ? `<div class="edit-counts">${counts}</div>` : ""}
         </div>
       `;
       container.querySelectorAll(".edit-tool-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
+          if (btn.dataset.action === "furniture-delete") {
+            this._deleteFurniture();
+            return;
+          }
+          if (btn.dataset.action === "zone-delete") {
+            this._deleteSelectedZone();
+            return;
+          }
           this._editTool = btn.dataset.tool;
+          this._selectedFurnitureIdx = -1;
+          this._selectedZoneIdx = -1;
+          this._furniturePickerOpen = false;
           this._updateContent();
         });
+      });
+      // Bind furniture type picker buttons
+      container.querySelectorAll(".furniture-type-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          this._addFurniture(parseInt(btn.dataset.type, 10));
+        });
+      });
+      container.querySelector(".furniture-picker-cancel")?.addEventListener("click", () => {
+        this._furniturePickerOpen = false;
+        this._furniturePlacePoint = null;
+        this._updateContent();
       });
       return;
     }
@@ -1397,6 +1969,13 @@ class DreameVacuumMapCard extends HTMLElement {
         cliff: this._editCliffs.map((t) => t.vacuum_coords),
       };
 
+      // Furniture: convert each item back to [cx, cy, type, flag, cx2, cy2, w, h, user_flag]
+      serviceData.furniture = this._editFurniture.map((f) => {
+        const cx = Math.round(f.vacuum_cx);
+        const cy = Math.round(f.vacuum_cy);
+        return [cx, cy, f.type, 0, cx, cy, Math.round(f.vacuum_w), Math.round(f.vacuum_h), 0];
+      });
+
       const sentCounts = {
         passable: serviceData.thresholds.vwsl.length,
         impassable: serviceData.thresholds.npthrsd.length,
@@ -1405,6 +1984,7 @@ class DreameVacuumMapCard extends HTMLElement {
         no_go: serviceData.no_go_zones.length,
         wall: serviceData.virtual_walls.length,
         low_clearance: serviceData.low_clearance_zones.length,
+        furniture: serviceData.furniture.length,
       };
       await this._hass.callService("dreame_cloud", "update_map", serviceData);
       this._mode = "all";
@@ -1452,6 +2032,7 @@ class DreameVacuumMapCard extends HTMLElement {
       no_go: "no_go_zones",
       wall: "virtual_walls",
       low_clearance: "low_clearance_zones",
+      furniture: "furniture",
     };
     const rejected = [];
     for (const [key, sent] of Object.entries(sentCounts)) {
@@ -2219,6 +2800,57 @@ class DreameVacuumMapCard extends HTMLElement {
         font-size: 12px;
         color: var(--text-secondary);
         font-weight: 500;
+      }
+      .furniture-actions {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+      .furniture-delete-btn {
+        border-color: #f44336 !important;
+        color: #f44336 !important;
+      }
+      .furniture-picker {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        margin: 6px 0;
+      }
+      .furniture-picker-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+      }
+      .furniture-picker-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .furniture-type-btn {
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text-secondary);
+        border-radius: 4px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .furniture-type-btn:hover {
+        border-color: #ffc107;
+        color: #ffc107;
+      }
+      .furniture-picker-cancel {
+        padding: 4px 12px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-secondary);
+        border-radius: 4px;
+        font-size: 11px;
+        cursor: pointer;
       }
       .action-btn.disabled {
         opacity: 0.4;

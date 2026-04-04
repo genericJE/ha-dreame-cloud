@@ -123,6 +123,10 @@ async def async_setup_entry(
                     ),
                 }
             ),
+            vol.Optional("furniture"): vol.All(
+                vol.Coerce(list),
+                [vol.All(vol.Coerce(list), [vol.Coerce(int)])],
+            ),
         },
         "async_update_map",
     )
@@ -285,9 +289,10 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         virtual_walls: list[list[int]] | None = None,
         low_clearance_zones: list[dict[str, Any]] | None = None,
         thresholds: dict[str, Any] | None = None,
+        furniture: list[list[int]] | None = None,
         **kwargs: Any,
     ) -> None:
-        """Update map data (no-go zones, virtual walls, low-clearance zones, thresholds).
+        """Update map data (no-go zones, virtual walls, low-clearance zones, thresholds, furniture).
 
         Sends an UPDATE_MAP_DATA action (siid 6, aiid 2) with piid 4
         containing the zone data in Dreame protocol format.
@@ -315,6 +320,9 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             vws_data = {k: v for k, v in thresholds.items() if k != "cliff"}
             if vws_data:
                 update["vws"] = vws_data
+
+        if furniture is not None:
+            update["ai_furniture_user"] = furniture
 
         if not update:
             return
