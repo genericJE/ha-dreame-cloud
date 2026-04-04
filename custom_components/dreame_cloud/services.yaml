@@ -50,6 +50,71 @@ clean_segment:
           max: 2
           mode: slider
 
+update_map:
+  name: Update Map
+  description: Update map features like no-go zones, virtual walls, and low-clearance areas.
+  target:
+    entity:
+      integration: dreame_cloud
+      domain: vacuum
+  fields:
+    no_go_zones:
+      name: No-Go Zones
+      description: "List of no-go zones. Each zone has roi: [x1,y1, x2,y2, x3,y3, x4,y4] in vacuum coords."
+      selector:
+        object:
+    virtual_walls:
+      name: Virtual Walls
+      description: "List of virtual walls. Each wall is [x1, y1, x2, y2] in vacuum coords."
+      selector:
+        object:
+    low_clearance_zones:
+      name: Low-Clearance Zones
+      description: "List of low-clearance/low-lying areas. Each zone has roi: [x1,y1, x2,y2, x3,y3, x4,y4]."
+      selector:
+        object:
+
+goto:
+  name: Go To Point
+  description: Send the vacuum to a specific point on the map (uses spot cleaning at the target coordinate).
+  target:
+    entity:
+      integration: dreame_cloud
+      domain: vacuum
+  fields:
+    x:
+      name: X Coordinate
+      description: X coordinate in vacuum units.
+      required: true
+      selector:
+        number:
+          mode: box
+    y:
+      name: Y Coordinate
+      description: Y coordinate in vacuum units.
+      required: true
+      selector:
+        number:
+          mode: box
+
+request_map:
+  name: Request Map
+  description: Request a map with a specific req_type parameter. Useful for investigating what metadata different map types contain.
+  target:
+    entity:
+      integration: dreame_cloud
+      domain: vacuum
+  fields:
+    req_type:
+      name: Request Type
+      description: "Map variant to request: 1=current, 2=saved. Other values are untested."
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
+
 clean_zone:
   name: Clean Zone
   description: Clean specific zones by coordinates with custom settings.

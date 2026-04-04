@@ -79,6 +79,33 @@ async def async_setup_entry(
         },
         "async_clean_segment",
     )
+    _zone_schema = vol.All(
+        vol.Coerce(list),
+        [
+            vol.Schema(
+                {
+                    vol.Optional("id"): int,
+                    vol.Optional("type", default=0): int,
+                    vol.Optional("hide", default=0): int,
+                    vol.Required("roi"): vol.All(
+                        vol.Coerce(list), [vol.Coerce(int)]
+                    ),
+                }
+            )
+        ],
+    )
+    platform.async_register_entity_service(
+        "update_map",
+        {
+            vol.Optional("no_go_zones"): _zone_schema,
+            vol.Optional("virtual_walls"): vol.All(
+                vol.Coerce(list),
+                [vol.All(vol.Coerce(list), [vol.Coerce(int)])],
+            ),
+            vol.Optional("low_clearance_zones"): _zone_schema,
+        },
+        "async_update_map",
+    )
     platform.async_register_entity_service(
         "clean_zone",
         {
@@ -100,6 +127,23 @@ async def async_setup_entry(
             ),
         },
         "async_clean_zone",
+    )
+    platform.async_register_entity_service(
+        "goto",
+        {
+            vol.Required("x"): vol.Coerce(int),
+            vol.Required("y"): vol.Coerce(int),
+        },
+        "async_goto",
+    )
+    platform.async_register_entity_service(
+        "request_map",
+        {
+            vol.Optional("req_type", default=1): vol.All(
+                int, vol.Range(min=1, max=10)
+            ),
+        },
+        "async_request_map",
     )
 
 
@@ -215,6 +259,41 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         )
         await self.coordinator.async_request_refresh()
 
+    async def async_update_map(
+        self,
+        no_go_zones: list[dict[str, Any]] | None = None,
+        virtual_walls: list[list[int]] | None = None,
+        low_clearance_zones: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Update map data (no-go zones, virtual walls, low-clearance zones).
+
+        Sends an UPDATE_MAP_DATA action (siid 6, aiid 2) with piid 4
+        containing the zone data in Dreame protocol format.
+        """
+        update: dict[str, Any] = {}
+
+        # Virtual walls and no-go zones use the "vw" dict with sub-keys
+        vw: dict[str, Any] = {}
+        if virtual_walls is not None:
+            vw["line"] = virtual_walls
+        if no_go_zones is not None:
+            vw["rect"] = no_go_zones
+        if vw:
+            update["vw"] = vw
+
+        if low_clearance_zones is not None:
+            update["sneak_areas"] = low_clearance_zones
+
+        if not update:
+            return
+
+        value = json.dumps(update)
+        await self.coordinator.device.send_action(
+            6, 2, params=[{"piid": 4, "value": value}]
+        )
+        await self.coordinator.async_request_refresh()
+
     async def async_clean_zone(
         self,
         zones: list[list[int]] | None = None,
@@ -238,6 +317,51 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         await self.coordinator.device.send_action(
             4, 1, params=[{"piid": 1, "value": value}]
         )
+        await self.coordinator.async_request_refresh()
+
+    async def async_goto(
+        self,
+        x: int,
+        y: int,
+        **kwargs: Any,
+    ) -> None:
+        """Send the vacuum to a specific point on the map.
+
+        Uses spot cleaning at the target coordinate. The Dreame protocol
+        requires piid 1 = 20 (spot cleaning status) and piid 10 with a
+        points array containing [x, y, repeats, suction, water].
+        """
+        status = self.coordinator.data.status
+        suction = status.suction_level if status else 1
+        water = status.water_volume if status else 2
+        value = json.dumps({"points": [[x, y, 1, suction, water]]})
+        await self.coordinator.device.send_action(
+            4, 1, params=[
+                {"piid": 1, "value": 20},
+                {"piid": 10, "value": value},
+            ],
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_request_map(
+        self,
+        req_type: int = 1,
+        **kwargs: Any,
+    ) -> None:
+        """Request a map with a specific req_type for investigation.
+
+        req_type 1 = current map, 2 = saved map. Other values are untested.
+        The resulting metadata is logged at INFO level for inspection.
+        Updates the coordinator's cached map so the camera re-renders.
+        """
+        map_data = await self.coordinator.device.get_map(req_type=req_type)
+        meta_keys = sorted(map_data.raw_metadata.keys())
+        _LOGGER.info(
+            "Map req_type=%d: %d rooms, %d metadata keys: %s",
+            req_type, len(map_data.rooms), len(meta_keys), meta_keys,
+        )
+        # Update the coordinator's cached map data so the camera renders it
+        self.coordinator._map_data = map_data  # noqa: SLF001
         await self.coordinator.async_request_refresh()
 
     @property
