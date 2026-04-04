@@ -60,6 +60,7 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
         self._map_attrs: dict[str, Any] = {}
         self._last_frame_id: int | None = None
         self._last_opts: tuple[int, bool, bool] | None = None
+        self._last_pending: dict | None = None
 
     async def async_added_to_hass(self) -> None:
         """Register for option updates when added to hass."""
@@ -88,15 +89,17 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
         """Return map metadata for the frontend card."""
         return self._map_attrs
 
-    async def async_camera_image(
-        self, width: int | None = None, height: int | None = None
-    ) -> bytes | None:
-        """Return the current map image."""
+    def _handle_coordinator_update(self) -> None:
+        """Re-render map when coordinator data changes."""
+        self.hass.async_create_task(self._async_rerender())
+
+    async def _async_rerender(self) -> None:
+        """Re-render the map image and update state if anything changed."""
         map_data = (
             self.coordinator.data.map_data if self.coordinator.data else None
         )
         if map_data is None:
-            return self._image
+            return
 
         frame_id = map_data.header.frame_id
         options = self.coordinator.config_entry.options
@@ -105,13 +108,21 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
             options.get(CONF_MAP_FLIP_X, False),
             options.get(CONF_MAP_FLIP_Y, False),
         )
-        if frame_id != self._last_frame_id or opts_key != self._last_opts:
+        pending = self.coordinator._pending_zone_update  # noqa: SLF001
+        pending_changed = pending is not self._last_pending
+        if frame_id != self._last_frame_id or opts_key != self._last_opts or pending_changed:
             self._image, self._map_attrs = await self.hass.async_add_executor_job(
-                _render_map, map_data, *opts_key
+                _render_map, map_data, *opts_key, pending,
             )
             self._last_frame_id = frame_id
             self._last_opts = opts_key
-            self.async_write_ha_state()
+            self._last_pending = pending
+        self.async_write_ha_state()
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """Return the current map image."""
         return self._image
 
 
@@ -650,6 +661,7 @@ def _render_map(
     rotation: int = 0,
     flip_x: bool = False,
     flip_y: bool = False,
+    pending_zone_update: dict[str, Any] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     """Render map data to a PNG image and compute metadata attributes."""
     header = map_data.header
@@ -784,6 +796,15 @@ def _render_map(
                 effective_meta[zone_key] = saved_meta[zone_key]
     else:
         effective_meta = map_data.raw_metadata
+
+    # If the user just saved zones via update_map, overlay that data
+    # instead of stale rism data.  The cloud's rism blob updates lazily
+    # so without this, deletions appear to revert.
+    if pending_zone_update:
+        effective_meta = dict(effective_meta)
+        for zone_key in ("vw", "vws", "sneak_areas"):
+            if zone_key in pending_zone_update:
+                effective_meta[zone_key] = pending_zone_update[zone_key]
 
     transform_args = (header, w, h, flip_x, flip_y, rotation, scale)
 

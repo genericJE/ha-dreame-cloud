@@ -68,6 +68,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         self._map_data: DreameMap | None = None
         self._last_map_update: float = 0
         self._connected = False
+        self._pending_zone_update: dict | None = None
 
     @property
     def device(self) -> DreameDevice:

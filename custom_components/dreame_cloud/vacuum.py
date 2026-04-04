@@ -323,6 +323,9 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         await self.coordinator.device.send_action(
             6, 2, params=[{"piid": 4, "value": value}]
         )
+        # Cache the sent zone data so camera.py uses it instead of
+        # stale rism data until the cloud updates the saved map blob.
+        self.coordinator._pending_zone_update = update  # noqa: SLF001
         # Force next refresh to re-fetch map data (bypass idle throttle)
         self.coordinator._last_map_update = 0  # noqa: SLF001
         await self.coordinator.async_request_refresh()
