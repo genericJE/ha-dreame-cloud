@@ -1,5 +1,7 @@
 # Dreame Cloud Vacuum for Home Assistant
 
+> **Work in progress** -- This integration is under active development and not ready for general use. APIs, configuration, and behavior may change without notice. Do not install unless you are contributing to development.
+
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 
 A Home Assistant custom integration for Dreame robot vacuums via the Dreame Cloud API. Uses the [dreame-mocker](https://github.com/genericJE/dreame-mocker) client library to communicate directly with Dreame's cloud infrastructure -- no Xiaomi cloud dependency.
