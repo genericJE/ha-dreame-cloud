@@ -40,7 +40,8 @@ class DreameVacuumMapCard extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._selectedRooms = new Set();
-    this._mode = "all"; // all | room | zone
+    this._roomOrder = []; // ordered list of selected room segment IDs
+    this._mode = DreameVacuumMapCard._persistedMode || "all"; // all | room | zone | edit | goto
     this._roomView = "map"; // map | list
     this._settingsOpen = false;
     this._zone = null; // {x1, y1, x2, y2} in image px during drawing
@@ -48,6 +49,18 @@ class DreameVacuumMapCard extends HTMLElement {
     this._drawing = false;
     this._lastEntityPicture = null;
     this._entities = {};
+    // Edit mode state
+    this._editTool = "no_go"; // no_go | wall | carpet | low_clearance
+    this._editNoGoZones = [];
+    this._editVirtualWalls = [];
+    this._editCarpetZones = [];
+    this._editLowClearanceZones = [];
+    this._editDirty = false;
+    this._drawingWall = null; // {x1, y1, x2, y2} during wall drawing
+    this._drawingRect = null; // {x1, y1, x2, y2} during rect drawing (no-go, carpet, low-clearance)
+    this._pointerStart = null; // {x, y} for tap detection
+    // Pin and Go state
+    this._gotoPin = null; // {x, y} in SVG coords
   }
 
   static getConfigElement() {
@@ -62,14 +75,24 @@ class DreameVacuumMapCard extends HTMLElement {
     if (!config.entity) {
       throw new Error("Please define an entity");
     }
+    const needsRender = !this._rendered
+      || config.entity !== this._config?.entity
+      || config.map_entity !== this._config?.map_entity;
     this._config = { ...config };
+    if (!this._config.room_aliases) this._config.room_aliases = {};
+    if (!this._config.hidden_rooms) this._config.hidden_rooms = [];
     this._deriveEntities();
-    this._render();
+    if (needsRender) {
+      this._render();
+      this._rendered = true;
+    } else {
+      this._updateContent();
+    }
   }
 
   set hass(hass) {
     this._hass = hass;
-    this._updateContent();
+    if (this._rendered) this._updateContent();
   }
 
   _deriveEntities() {
@@ -96,6 +119,12 @@ class DreameVacuumMapCard extends HTMLElement {
       mop_dry: `button.${base}_start_mop_dry`,
       dust_collection: `button.${base}_start_dust_collection`,
     };
+  }
+
+  _getRoomName(segId, room) {
+    const alias = this._config.room_aliases?.[String(segId)];
+    if (alias) return alias;
+    return room?.name || `Room ${segId}`;
   }
 
   _getState(entityId) {
@@ -135,6 +164,8 @@ class DreameVacuumMapCard extends HTMLElement {
           <button class="tab" data-mode="all">All</button>
           <button class="tab" data-mode="room">Room</button>
           <button class="tab" data-mode="zone">Zone</button>
+          <button class="tab" data-mode="goto">Go To</button>
+          <button class="tab" data-mode="edit">Edit</button>
         </div>
         <div class="room-list-container"></div>
         <div class="config-section"></div>
@@ -147,10 +178,19 @@ class DreameVacuumMapCard extends HTMLElement {
     // Bind mode tabs
     card.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", () => {
-        this._mode = tab.dataset.mode;
+        const newMode = tab.dataset.mode;
+        this._mode = newMode;
+        DreameVacuumMapCard._persistedMode = newMode;
         this._selectedRooms.clear();
+        this._roomOrder = [];
         this._zoneFinalized = null;
         this._zone = null;
+        this._gotoPin = null;
+        if (newMode === "edit") {
+          this._enterEditMode();
+        } else {
+          this._exitEditMode();
+        }
         this._updateContent();
       });
     });
@@ -292,13 +332,27 @@ class DreameVacuumMapCard extends HTMLElement {
 
     // Room overlays (only in room mode)
     const rooms = camera.attributes.rooms || {};
+    const hiddenRooms = this._config.hidden_rooms || [];
     if (this._mode === "room") {
       for (const [segId, room] of Object.entries(rooms)) {
+        if (hiddenRooms.includes(parseInt(segId, 10))) continue;
         const selected = this._selectedRooms.has(parseInt(segId, 10));
         const [r, g, b] = room.color || [135, 206, 235];
         const opacity = selected ? 0.5 : 0.15;
         const strokeWidth = selected ? 3 : 1;
         const strokeColor = selected ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},0.4)`;
+
+        const orderIdx = this._roomOrder.indexOf(parseInt(segId, 10));
+        const orderBadge = selected && orderIdx >= 0 ? `
+            <circle cx="${room.x + room.w - 6}" cy="${room.y + 6}" r="10"
+              fill="rgb(${r},${g},${b})" stroke="white" stroke-width="2" />
+            <text x="${room.x + room.w - 6}" y="${room.y + 6}"
+              text-anchor="middle" dominant-baseline="central"
+              fill="white" font-size="11" font-weight="700"
+              font-family="system-ui, sans-serif">
+              ${orderIdx + 1}
+            </text>
+          ` : "";
 
         svgContent += `
           <g class="room-overlay" data-seg-id="${segId}" style="cursor:pointer">
@@ -311,28 +365,160 @@ class DreameVacuumMapCard extends HTMLElement {
               fill="white" font-size="${Math.min(room.w, room.h) > 80 ? 14 : 10}"
               font-family="system-ui, sans-serif" font-weight="500"
               paint-order="stroke" stroke="rgba(0,0,0,0.6)" stroke-width="3">
-              ${room.name}
+              ${this._getRoomName(segId, room)}
             </text>
+            <text x="${room.x + 6}" y="${room.y + 12}"
+              fill="rgba(255,255,255,0.5)" font-size="9"
+              font-family="system-ui, sans-serif" font-weight="600"
+              paint-order="stroke" stroke="rgba(0,0,0,0.4)" stroke-width="2">
+              #${segId}
+            </text>
+            ${orderBadge}
           </g>
         `;
       }
     }
 
-    // Robot position
-    const robotPos = camera.attributes.robot_position;
-    if (robotPos) {
+    // Zone type rendering config: [editArray, attrKey, fill, stroke]
+    const _zoneStyles = [
+      [this._editNoGoZones, "no_go_zones", "rgba(244,67,54,0.2)", "#f44336"],
+      [this._editCarpetZones, "carpet_zones", "rgba(156,39,176,0.2)", "#9c27b0"],
+      [this._editLowClearanceZones, "low_clearance_zones", "rgba(33,150,243,0.2)", "#2196f3"],
+    ];
+    for (const [editZones, attrKey, fill, stroke] of _zoneStyles) {
+      const zones = this._mode === "edit" ? editZones : (camera.attributes[attrKey] || []);
+      for (const zone of zones) {
+        if (!zone.points || zone.points.length !== 4) continue;
+        const pts = zone.points.map((p) => `${p.x},${p.y}`).join(" ");
+        svgContent += `
+          <polygon points="${pts}"
+            fill="${fill}" stroke="${stroke}" stroke-width="2"
+            stroke-dasharray="6 3"
+            style="${this._mode === "edit" ? "cursor:pointer" : ""}" />
+        `;
+      }
+    }
+
+    // Drawing preview for rect zones
+    if (this._mode === "edit" && this._drawingRect) {
+      const d = this._drawingRect;
+      const x = Math.min(d.x1, d.x2), y = Math.min(d.y1, d.y2);
+      const w = Math.abs(d.x2 - d.x1), h = Math.abs(d.y2 - d.y1);
+      const toolColors = {
+        no_go: "#f44336", carpet: "#9c27b0", low_clearance: "#2196f3",
+      };
+      const color = toolColors[this._editTool] || "#f44336";
       svgContent += `
-        <circle cx="${robotPos.x}" cy="${robotPos.y}" r="10"
-          fill="#ff3c3c" stroke="white" stroke-width="2" />
+        <rect x="${x}" y="${y}" width="${w}" height="${h}"
+          fill="${color}26" stroke="${color}" stroke-width="2"
+          stroke-dasharray="4 2" />
       `;
     }
 
-    // Charger position
+    // Virtual walls (use edit working copy in edit mode)
+    const virtualWalls = this._mode === "edit" ? this._editVirtualWalls : (camera.attributes.virtual_walls || []);
+    for (let i = 0; i < virtualWalls.length; i++) {
+      const wall = virtualWalls[i];
+      svgContent += `
+        <line x1="${wall.x1}" y1="${wall.y1}" x2="${wall.x2}" y2="${wall.y2}"
+          stroke="#f44336" stroke-width="3" stroke-dasharray="8 4" stroke-linecap="round"
+          style="${this._mode === "edit" ? "cursor:pointer" : ""}" />
+      `;
+    }
+
+    // Drawing preview for virtual wall
+    if (this._mode === "edit" && this._drawingWall) {
+      const d = this._drawingWall;
+      svgContent += `
+        <line x1="${d.x1}" y1="${d.y1}" x2="${d.x2}" y2="${d.y2}"
+          stroke="#f44336" stroke-width="3" stroke-dasharray="4 2"
+          stroke-linecap="round" opacity="0.7" />
+      `;
+    }
+
+    // Furniture
+    const furniture = camera.attributes.furniture || [];
+    for (const item of furniture) {
+      svgContent += `
+        <rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}"
+          fill="rgba(158, 158, 158, 0.15)" stroke="rgba(158, 158, 158, 0.5)"
+          stroke-width="1" stroke-dasharray="4 2" rx="2" />
+        <text x="${item.center_x}" y="${item.center_y}"
+          text-anchor="middle" dominant-baseline="middle"
+          fill="rgba(255,255,255,0.6)" font-size="9"
+          font-family="system-ui, sans-serif"
+          paint-order="stroke" stroke="rgba(0,0,0,0.4)" stroke-width="2">
+          ${item.name}
+        </text>
+      `;
+    }
+
+    // SVG defs for gradients/filters (only add once)
+    svgContent += `
+      <defs>
+        <radialGradient id="robotBody" cx="40%" cy="35%" r="60%">
+          <stop offset="0%" stop-color="#505060" />
+          <stop offset="100%" stop-color="#252530" />
+        </radialGradient>
+        <radialGradient id="lidarTurret" cx="45%" cy="40%" r="55%">
+          <stop offset="0%" stop-color="#6a6a7a" />
+          <stop offset="100%" stop-color="#3a3a48" />
+        </radialGradient>
+        <filter id="robotShadow" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.5)" />
+        </filter>
+        <radialGradient id="chargerGrad" cx="40%" cy="35%" r="60%">
+          <stop offset="0%" stop-color="#43a047" />
+          <stop offset="100%" stop-color="#2e7d32" />
+        </radialGradient>
+      </defs>
+    `;
+
+    // Robot position (top-down robot vacuum)
+    const robotPos = camera.attributes.robot_position;
+    if (robotPos) {
+      const rx = robotPos.x, ry = robotPos.y;
+      const R = 22;
+      svgContent += `
+        <g transform="translate(${rx}, ${ry})" filter="url(#robotShadow)">
+          <!-- Body -->
+          <circle cx="0" cy="0" r="${R}" fill="url(#robotBody)" />
+          <!-- Edge ring -->
+          <circle cx="0" cy="0" r="${R}" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" />
+          <!-- Front bumper (top of robot = forward) -->
+          <path d="M${-R + 3},${-4} A${R - 3},${R - 3} 0 0,1 ${R - 3},${-4}"
+            fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="2.5" stroke-linecap="round" />
+          <!-- LiDAR turret -->
+          <circle cx="0" cy="0" r="8" fill="url(#lidarTurret)" />
+          <circle cx="0" cy="0" r="8" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="0.8" />
+          <!-- LiDAR slit -->
+          <rect x="-5" y="-1" width="10" height="2" rx="1" fill="rgba(100,180,255,0.5)" />
+          <!-- Side brush indicator (bottom-left) -->
+          <g transform="translate(${-R + 8}, ${R - 8})">
+            <line x1="-4" y1="0" x2="4" y2="0" stroke="rgba(255,255,255,0.3)" stroke-width="1" />
+            <line x1="0" y1="-4" x2="0" y2="4" stroke="rgba(255,255,255,0.3)" stroke-width="1" />
+            <line x1="-3" y1="-3" x2="3" y2="3" stroke="rgba(255,255,255,0.3)" stroke-width="1" />
+            <line x1="3" y1="-3" x2="-3" y2="3" stroke="rgba(255,255,255,0.3)" stroke-width="1" />
+          </g>
+          <!-- Forward direction dot -->
+          <circle cx="0" cy="${-R + 7}" r="2.5" fill="rgba(66,165,245,0.8)" />
+        </g>
+      `;
+    }
+
+    // Charger position (dock icon)
     const chargerPos = camera.attributes.charger_position;
     if (chargerPos) {
+      const cx = chargerPos.x, cy = chargerPos.y;
       svgContent += `
-        <rect x="${chargerPos.x - 8}" y="${chargerPos.y - 8}" width="16" height="16"
-          fill="#3cdc3c" stroke="white" stroke-width="2" rx="3" />
+        <g transform="translate(${cx}, ${cy})" filter="url(#robotShadow)">
+          <rect x="-14" y="-14" width="28" height="28" rx="6"
+            fill="url(#chargerGrad)" />
+          <rect x="-14" y="-14" width="28" height="28" rx="6"
+            fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
+          <path d="M-4,-8 L4,-8 L1.5,-1.5 L5.5,-1.5 L-2.5,8 L0,1.5 L-5.5,1.5 Z"
+            fill="white" opacity="0.85" />
+        </g>
       `;
     }
 
@@ -354,6 +540,21 @@ class DreameVacuumMapCard extends HTMLElement {
       }
     }
 
+    // Goto pin
+    if (this._gotoPin && this._mode === "goto") {
+      const gx = this._gotoPin.x, gy = this._gotoPin.y;
+      svgContent += `
+        <g transform="translate(${gx}, ${gy})">
+          <circle cx="0" cy="0" r="14" fill="rgba(33, 150, 243, 0.3)" />
+          <circle cx="0" cy="0" r="8" fill="#2196f3" stroke="white" stroke-width="2" />
+          <circle cx="0" cy="0" r="3" fill="white" />
+          <!-- Pin stem and head -->
+          <line x1="0" y1="-8" x2="0" y2="-28" stroke="#2196f3" stroke-width="2.5" />
+          <circle cx="0" cy="-28" r="6" fill="#2196f3" stroke="white" stroke-width="2" />
+        </g>
+      `;
+    }
+
     mapOverlay.innerHTML = svgContent;
 
     // Bind room click handlers
@@ -364,63 +565,258 @@ class DreameVacuumMapCard extends HTMLElement {
           const segId = parseInt(el.dataset.segId, 10);
           if (this._selectedRooms.has(segId)) {
             this._selectedRooms.delete(segId);
+            this._roomOrder = this._roomOrder.filter((id) => id !== segId);
           } else {
             this._selectedRooms.add(segId);
+            this._roomOrder.push(segId);
           }
           this._updateContent();
         });
       });
     }
+
+    // (Edit mode deletion is handled via tap detection in _onPointerUp)
   }
 
   _onPointerDown(e) {
-    if (this._mode !== "zone") return;
+    const pt = this._getSvgCoords(e);
+    if (!pt) return;
     const svg = this.shadowRoot.querySelector(".map-overlay");
-    if (!svg) return;
 
-    const rect = svg.getBoundingClientRect();
-    const svgWidth = parseFloat(svg.getAttribute("viewBox")?.split(" ")[2] || "800");
-    const svgHeight = parseFloat(svg.getAttribute("viewBox")?.split(" ")[3] || "600");
+    if (this._mode === "zone") {
+      this._drawing = true;
+      this._zone = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
+      this._zoneFinalized = null;
+      svg.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
 
-    const x = ((e.clientX - rect.left) / rect.width) * svgWidth;
-    const y = ((e.clientY - rect.top) / rect.height) * svgHeight;
+    if (this._mode === "goto") {
+      this._pointerStart = { x: pt.x, y: pt.y };
+      e.preventDefault();
+      return;
+    }
 
-    this._drawing = true;
-    this._zone = { x1: x, y1: y, x2: x, y2: y };
-    this._zoneFinalized = null;
-    svg.setPointerCapture(e.pointerId);
-    e.preventDefault();
+    if (this._mode === "edit") {
+      this._pointerStart = { x: pt.x, y: pt.y };
+      if (this._editTool === "wall") {
+        this._drawing = true;
+        this._drawingWall = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
+      } else {
+        // All rect-based tools: no_go, carpet, low_clearance
+        this._drawing = true;
+        this._drawingRect = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
+      }
+      svg.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
   }
 
   _onPointerMove(e) {
-    if (!this._drawing || !this._zone) return;
-    const svg = this.shadowRoot.querySelector(".map-overlay");
-    if (!svg) return;
+    const pt = this._getSvgCoords(e);
+    if (!pt) return;
 
-    const rect = svg.getBoundingClientRect();
-    const svgWidth = parseFloat(svg.getAttribute("viewBox")?.split(" ")[2] || "800");
-    const svgHeight = parseFloat(svg.getAttribute("viewBox")?.split(" ")[3] || "600");
+    if (this._mode === "zone" && this._drawing && this._zone) {
+      this._zone.x2 = pt.x;
+      this._zone.y2 = pt.y;
+      this._updateMap(this.shadowRoot.querySelector("ha-card"));
+      e.preventDefault();
+      return;
+    }
 
-    this._zone.x2 = Math.max(0, Math.min(svgWidth, ((e.clientX - rect.left) / rect.width) * svgWidth));
-    this._zone.y2 = Math.max(0, Math.min(svgHeight, ((e.clientY - rect.top) / rect.height) * svgHeight));
-
-    this._updateMap(this.shadowRoot.querySelector("ha-card"));
-    e.preventDefault();
+    if (this._mode === "edit" && this._drawing) {
+      if (this._drawingRect) {
+        this._drawingRect.x2 = pt.x;
+        this._drawingRect.y2 = pt.y;
+        this._updateMap(this.shadowRoot.querySelector("ha-card"));
+        e.preventDefault();
+      } else if (this._drawingWall) {
+        this._drawingWall.x2 = pt.x;
+        this._drawingWall.y2 = pt.y;
+        this._updateMap(this.shadowRoot.querySelector("ha-card"));
+        e.preventDefault();
+      }
+    }
   }
 
   _onPointerUp(e) {
-    if (!this._drawing || !this._zone) return;
+    // Handle goto tap (no drawing involved)
+    if (this._mode === "goto" && this._pointerStart) {
+      const pt = this._getSvgCoords(e);
+      if (pt) {
+        const dist = Math.hypot(pt.x - this._pointerStart.x, pt.y - this._pointerStart.y);
+        if (dist < 8) {
+          this._gotoPin = { x: pt.x, y: pt.y };
+          this._updateContent();
+        }
+      }
+      this._pointerStart = null;
+      e.preventDefault();
+      return;
+    }
+
+    if (!this._drawing) return;
     this._drawing = false;
 
-    const dx = Math.abs(this._zone.x2 - this._zone.x1);
-    const dy = Math.abs(this._zone.y2 - this._zone.y1);
-
-    if (dx > 10 && dy > 10) {
-      this._zoneFinalized = { ...this._zone };
+    if (this._mode === "zone" && this._zone) {
+      const dx = Math.abs(this._zone.x2 - this._zone.x1);
+      const dy = Math.abs(this._zone.y2 - this._zone.y1);
+      if (dx > 10 && dy > 10) {
+        this._zoneFinalized = { ...this._zone };
+      }
+      this._zone = null;
+      this._updateContent();
+      e.preventDefault();
+      return;
     }
-    this._zone = null;
-    this._updateContent();
-    e.preventDefault();
+
+    if (this._mode === "edit") {
+      const pt = this._getSvgCoords(e);
+      const start = this._pointerStart;
+      const tapDist = start && pt ? Math.hypot(pt.x - start.x, pt.y - start.y) : Infinity;
+      const isTap = tapDist < 8;
+
+      if (isTap) {
+        // Tap: try to delete an existing zone or wall under the pointer
+        this._drawingRect = null;
+        this._drawingWall = null;
+        const deleted = this._tryDeleteAtPoint(pt.x, pt.y);
+        if (deleted) {
+          this._editDirty = true;
+        }
+      } else if (this._drawingRect) {
+        const d = this._drawingRect;
+        const dx = Math.abs(d.x2 - d.x1);
+        const dy = Math.abs(d.y2 - d.y1);
+        if (dx > 10 && dy > 10) {
+          const x1 = Math.min(d.x1, d.x2), y1 = Math.min(d.y1, d.y2);
+          const x2 = Math.max(d.x1, d.x2), y2 = Math.max(d.y1, d.y2);
+          const [vx1, vy1] = this._imageToVacuumCoords(x1, y1);
+          const [vx2, vy2] = this._imageToVacuumCoords(x2, y1);
+          const [vx3, vy3] = this._imageToVacuumCoords(x2, y2);
+          const [vx4, vy4] = this._imageToVacuumCoords(x1, y2);
+          const newZone = {
+            points: [
+              { x: Math.round(x1), y: Math.round(y1) },
+              { x: Math.round(x2), y: Math.round(y1) },
+              { x: Math.round(x2), y: Math.round(y2) },
+              { x: Math.round(x1), y: Math.round(y2) },
+            ],
+            roi: [vx1, vy1, vx2, vy2, vx3, vy3, vx4, vy4],
+          };
+          this._getEditZonesForTool().push(newZone);
+          this._editDirty = true;
+        }
+        this._drawingRect = null;
+      } else if (this._drawingWall) {
+        const d = this._drawingWall;
+        const dist = Math.hypot(d.x2 - d.x1, d.y2 - d.y1);
+        if (dist > 10) {
+          const [vx1, vy1] = this._imageToVacuumCoords(d.x1, d.y1);
+          const [vx2, vy2] = this._imageToVacuumCoords(d.x2, d.y2);
+          this._editVirtualWalls.push({
+            x1: Math.round(d.x1), y1: Math.round(d.y1),
+            x2: Math.round(d.x2), y2: Math.round(d.y2),
+            vacuum_coords: [vx1, vy1, vx2, vy2],
+          });
+          this._editDirty = true;
+        }
+        this._drawingWall = null;
+      }
+      this._pointerStart = null;
+      this._updateContent();
+      e.preventDefault();
+    }
+  }
+
+  _getEditZonesForTool() {
+    switch (this._editTool) {
+      case "no_go": return this._editNoGoZones;
+      case "carpet": return this._editCarpetZones;
+      case "low_clearance": return this._editLowClearanceZones;
+      default: return this._editNoGoZones;
+    }
+  }
+
+  _tryDeleteAtPoint(px, py) {
+    // Check all rect zone types
+    const allRectZones = [
+      this._editNoGoZones,
+      this._editCarpetZones,
+      this._editLowClearanceZones,
+    ];
+    for (const zones of allRectZones) {
+      for (let i = zones.length - 1; i >= 0; i--) {
+        const zone = zones[i];
+        if (!zone.points || zone.points.length < 3) continue;
+        const xs = zone.points.map((p) => p.x);
+        const ys = zone.points.map((p) => p.y);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
+          zones.splice(i, 1);
+          return true;
+        }
+      }
+    }
+    // Check virtual walls
+    const threshold = 12;
+    for (let i = this._editVirtualWalls.length - 1; i >= 0; i--) {
+      const w = this._editVirtualWalls[i];
+      const dist = this._pointToSegmentDist(px, py, w.x1, w.y1, w.x2, w.y2);
+      if (dist <= threshold) {
+        this._editVirtualWalls.splice(i, 1);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  _pointToSegmentDist(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+  }
+
+  _enterEditMode() {
+    const camera = this._getState(this._entities.map);
+    const a = camera?.attributes || {};
+    this._editNoGoZones = JSON.parse(JSON.stringify(a.no_go_zones || []));
+    this._editVirtualWalls = JSON.parse(JSON.stringify(a.virtual_walls || []));
+    this._editCarpetZones = JSON.parse(JSON.stringify(a.carpet_zones || []));
+    this._editLowClearanceZones = JSON.parse(JSON.stringify(a.low_clearance_zones || []));
+    this._editTool = "no_go";
+    this._editDirty = false;
+    this._drawingRect = null;
+    this._drawingWall = null;
+    this._pointerStart = null;
+  }
+
+  _exitEditMode() {
+    this._editNoGoZones = [];
+    this._editVirtualWalls = [];
+    this._editCarpetZones = [];
+    this._editLowClearanceZones = [];
+    this._editDirty = false;
+    this._drawingRect = null;
+    this._drawingWall = null;
+    this._pointerStart = null;
+  }
+
+  _getSvgCoords(e) {
+    const svg = this.shadowRoot.querySelector(".map-overlay");
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    const svgWidth = parseFloat(svg.getAttribute("viewBox")?.split(" ")[2] || "800");
+    const svgHeight = parseFloat(svg.getAttribute("viewBox")?.split(" ")[3] || "600");
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * svgWidth,
+      y: ((e.clientY - rect.top) / rect.height) * svgHeight,
+    };
   }
 
   _imageToVacuumCoords(imgX, imgY) {
@@ -433,10 +829,11 @@ class DreameVacuumMapCard extends HTMLElement {
     const flipY = attrs.flip_y || false;
     const mapLeft = attrs.map_left || 0;
     const mapTop = attrs.map_top || 0;
+    const pixelSize = attrs.pixel_size || 1;
     const rawW = attrs.raw_width || 1;
     const rawH = attrs.raw_height || 1;
 
-    // Reverse scale
+    // Reverse scale to get pixel coords in the rotated/flipped frame
     let x = imgX / scale;
     let y = imgY / scale;
 
@@ -463,8 +860,9 @@ class DreameVacuumMapCard extends HTMLElement {
     if (flipY) y = (rawH - 1) - y;
     if (flipX) x = (rawW - 1) - x;
 
-    // Add map offsets
-    return [Math.round(x + mapLeft), Math.round(y + mapTop)];
+    // Convert pixel indices to vacuum coords:
+    // vacuum_coord = pixel_index * pixel_size + header_offset
+    return [Math.round(x * pixelSize + mapLeft), Math.round(y * pixelSize + mapTop)];
   }
 
   _updateModeTabs(card) {
@@ -475,6 +873,58 @@ class DreameVacuumMapCard extends HTMLElement {
 
   _updateRoomList(card) {
     const container = card.querySelector(".room-list-container");
+
+    if (this._mode === "edit") {
+      const tools = [
+        { id: "no_go", icon: "mdi:cancel", label: "No-Go" },
+        { id: "wall", icon: "mdi:wall", label: "Wall" },
+        { id: "carpet", icon: "mdi:rug", label: "Carpet" },
+        { id: "low_clearance", icon: "mdi:human-male-height", label: "Low Clear." },
+      ];
+      const hints = {
+        no_go: "Draw a rectangle for a no-go zone. Tap an existing zone to delete.",
+        wall: "Draw a line for a virtual wall. Tap an existing wall to delete.",
+        carpet: "Draw a rectangle to mark a carpet area. Tap to delete.",
+        low_clearance: "Draw a rectangle for a low-clearance area. Tap to delete.",
+      };
+      const counts = [
+        [this._editNoGoZones.length, "no-go"],
+        [this._editVirtualWalls.length, "wall"],
+        [this._editCarpetZones.length, "carpet"],
+        [this._editLowClearanceZones.length, "low-clear."],
+      ].filter(([c]) => c > 0).map(([c, l]) => `${c} ${l}`).join(" · ");
+
+      container.innerHTML = `
+        <div class="edit-toolbar">
+          <div class="edit-tool-selector">
+            ${tools.map((t) => `
+              <button class="edit-tool-btn ${this._editTool === t.id ? "active" : ""}" data-tool="${t.id}">
+                <ha-icon icon="${t.icon}"></ha-icon> ${t.label}
+              </button>
+            `).join("")}
+          </div>
+          <div class="edit-hint">${hints[this._editTool]}</div>
+          ${counts ? `<div class="edit-counts">${counts}</div>` : ""}
+        </div>
+      `;
+      container.querySelectorAll(".edit-tool-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          this._editTool = btn.dataset.tool;
+          this._updateContent();
+        });
+      });
+      return;
+    }
+
+    if (this._mode === "goto") {
+      container.innerHTML = `
+        <div class="selected-rooms-text" style="padding:10px 0">
+          ${this._gotoPin ? "Pin placed. Tap Send to navigate." : "Tap on the map to place a pin."}
+        </div>
+      `;
+      return;
+    }
+
     if (this._mode !== "room") {
       container.innerHTML = "";
       return;
@@ -482,7 +932,8 @@ class DreameVacuumMapCard extends HTMLElement {
 
     const camera = this._getState(this._entities.map);
     const rooms = camera?.attributes?.rooms || {};
-    const roomEntries = Object.entries(rooms);
+    const hiddenRooms = this._config.hidden_rooms || [];
+    const roomEntries = Object.entries(rooms).filter(([segId]) => !hiddenRooms.includes(parseInt(segId, 10)));
     if (roomEntries.length === 0) {
       container.innerHTML = "";
       return;
@@ -502,14 +953,20 @@ class DreameVacuumMapCard extends HTMLElement {
 
     if (this._roomView === "list") {
       const listItems = roomEntries
-        .sort(([, a], [, b]) => a.name.localeCompare(b.name))
+        .sort(([idA, a], [idB, b]) => this._getRoomName(idA, a).localeCompare(this._getRoomName(idB, b)))
         .map(([segId, room]) => {
-          const checked = this._selectedRooms.has(parseInt(segId, 10));
+          const sid = parseInt(segId, 10);
+          const checked = this._selectedRooms.has(sid);
           const [r, g, b] = room.color || [135, 206, 235];
+          const orderIdx = this._roomOrder.indexOf(sid);
+          const orderLabel = checked && orderIdx >= 0
+            ? `<span class="room-order" style="background:rgb(${r},${g},${b})">${orderIdx + 1}</span>`
+            : "";
           return `
             <label class="room-item ${checked ? "selected" : ""}" data-seg-id="${segId}">
               <span class="room-color" style="background:rgb(${r},${g},${b})"></span>
-              <span class="room-name">${room.name}</span>
+              <span class="room-name">${this._getRoomName(segId, room)}</span>
+              ${orderLabel}
               <input type="checkbox" ${checked ? "checked" : ""} />
             </label>
           `;
@@ -524,8 +981,10 @@ class DreameVacuumMapCard extends HTMLElement {
           const segId = parseInt(item.dataset.segId, 10);
           if (this._selectedRooms.has(segId)) {
             this._selectedRooms.delete(segId);
+            this._roomOrder = this._roomOrder.filter((id) => id !== segId);
           } else {
             this._selectedRooms.add(segId);
+            this._roomOrder.push(segId);
           }
           this._updateContent();
         });
@@ -534,7 +993,7 @@ class DreameVacuumMapCard extends HTMLElement {
       // Map view: show selected room names
       const selectedNames = roomEntries
         .filter(([segId]) => this._selectedRooms.has(parseInt(segId, 10)))
-        .map(([, room]) => room.name);
+        .map(([segId, room]) => this._getRoomName(segId, room));
       const selText = selectedNames.length > 0
         ? selectedNames.join(", ")
         : "Tap rooms on the map to select";
@@ -556,9 +1015,11 @@ class DreameVacuumMapCard extends HTMLElement {
   _updateConfigSection(card) {
     const section = card.querySelector(".config-section");
     const showConfig =
-      (this._mode === "room" && this._selectedRooms.size > 0) ||
-      (this._mode === "zone" && this._zoneFinalized) ||
-      this._mode === "all";
+      this._mode !== "edit" && this._mode !== "goto" && (
+        (this._mode === "room" && this._selectedRooms.size > 0) ||
+        (this._mode === "zone" && this._zoneFinalized) ||
+        this._mode === "all"
+      );
 
     if (!showConfig) {
       section.innerHTML = "";
@@ -626,8 +1087,63 @@ class DreameVacuumMapCard extends HTMLElement {
 
   _updateActions(card) {
     const actions = card.querySelector(".actions");
-    const state = this._getVacuumState();
 
+    if (this._mode === "goto") {
+      const hasPin = !!this._gotoPin;
+      actions.innerHTML = `
+        <div class="action-buttons">
+          <button class="action-btn secondary" data-action="goto_clear" ${hasPin ? "" : "disabled"}>
+            <ha-icon icon="mdi:close"></ha-icon> Clear
+          </button>
+          <button class="action-btn primary ${hasPin ? "" : "disabled"}" data-action="goto_send" ${hasPin ? "" : "disabled"}>
+            <ha-icon icon="mdi:map-marker-right"></ha-icon> Send
+          </button>
+        </div>
+      `;
+      actions.querySelector('[data-action="goto_clear"]')?.addEventListener("click", () => {
+        this._gotoPin = null;
+        this._updateContent();
+      });
+      actions.querySelector('[data-action="goto_send"]')?.addEventListener("click", () => {
+        if (!this._gotoPin) return;
+        const [vx, vy] = this._imageToVacuumCoords(this._gotoPin.x, this._gotoPin.y);
+        this._hass.callService("dreame_cloud", "goto", {
+          entity_id: this._entities.vacuum,
+          x: vx,
+          y: vy,
+        });
+        this._gotoPin = null;
+        this._mode = "all";
+        DreameVacuumMapCard._persistedMode = "all";
+        this._updateContent();
+      });
+      return;
+    }
+
+    if (this._mode === "edit") {
+      actions.innerHTML = `
+        <div class="action-buttons">
+          <button class="action-btn secondary" data-action="edit_cancel">
+            <ha-icon icon="mdi:close"></ha-icon> Cancel
+          </button>
+          <button class="action-btn primary ${this._editDirty ? "" : "disabled"}" data-action="edit_save" ${this._editDirty ? "" : "disabled"}>
+            <ha-icon icon="mdi:content-save"></ha-icon> Save
+          </button>
+        </div>
+      `;
+      actions.querySelector('[data-action="edit_cancel"]')?.addEventListener("click", () => {
+        this._mode = "all";
+        DreameVacuumMapCard._persistedMode = "all";
+        this._exitEditMode();
+        this._updateContent();
+      });
+      actions.querySelector('[data-action="edit_save"]')?.addEventListener("click", () => {
+        this._saveMapEdits();
+      });
+      return;
+    }
+
+    const state = this._getVacuumState();
     let buttons = "";
     if (state === "cleaning" || state === "returning") {
       buttons = `
@@ -696,7 +1212,7 @@ class DreameVacuumMapCard extends HTMLElement {
 
         this._hass.callService("dreame_cloud", "clean_segment", {
           entity_id: this._entities.vacuum,
-          segments: [...this._selectedRooms],
+          segments: this._roomOrder.length > 0 ? [...this._roomOrder] : [...this._selectedRooms],
           suction_level: suction,
           water_volume: water,
           cleaning_mode: mode,
@@ -743,6 +1259,32 @@ class DreameVacuumMapCard extends HTMLElement {
       this._hass.callService(domain, service, {
         entity_id: this._entities.vacuum,
       });
+    }
+  }
+
+  async _saveMapEdits() {
+    if (!this._hass || !this._editDirty) return;
+
+    const buildZonePayload = (zones) => zones.map((zone, i) => ({
+      id: i + 1,
+      type: zone.type ?? 0,
+      hide: zone.hide ?? 0,
+      roi: zone.roi,
+    }));
+
+    try {
+      await this._hass.callService("dreame_cloud", "update_map", {
+        entity_id: this._entities.vacuum,
+        no_go_zones: buildZonePayload(this._editNoGoZones),
+        virtual_walls: this._editVirtualWalls.map((wall) => wall.vacuum_coords),
+        low_clearance_zones: buildZonePayload(this._editLowClearanceZones),
+      });
+      this._mode = "all";
+      DreameVacuumMapCard._persistedMode = "all";
+      this._exitEditMode();
+      this._updateContent();
+    } catch (err) {
+      console.error("Failed to save map edits:", err);
     }
   }
 
@@ -1099,7 +1641,7 @@ class DreameVacuumMapCard extends HTMLElement {
         gap: 4px;
         max-height: 180px;
         overflow-y: auto;
-        padding-bottom: 8px;
+        padding: 2px 2px 8px;
       }
       .room-item {
         display: flex;
@@ -1128,6 +1670,18 @@ class DreameVacuumMapCard extends HTMLElement {
         flex: 1;
         font-size: 14px;
         color: var(--text-primary);
+      }
+      .room-order {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        color: white;
+        font-size: 12px;
+        font-weight: 700;
+        flex-shrink: 0;
       }
       .room-item input[type="checkbox"] {
         display: none;
@@ -1406,6 +1960,57 @@ class DreameVacuumMapCard extends HTMLElement {
         --mdc-icon-size: 22px;
         color: var(--accent);
       }
+
+      /* Edit Mode */
+      .edit-toolbar {
+        padding: 10px 0;
+      }
+      .edit-tool-selector {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .edit-tool-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 6px 10px;
+        border: 2px solid var(--border);
+        background: var(--surface);
+        color: var(--text-secondary);
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .edit-tool-btn ha-icon {
+        --mdc-icon-size: 16px;
+      }
+      .edit-tool-btn.active {
+        border-color: #f44336;
+        background: rgba(244, 67, 54, 0.08);
+        color: #f44336;
+      }
+      .edit-hint {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 6px;
+      }
+      .edit-counts {
+        display: flex;
+        gap: 16px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        font-weight: 500;
+      }
+      .action-btn.disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
     `;
   }
 
@@ -1424,13 +2029,17 @@ class DreameVacuumMapCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
+    const needsRender = !this._rendered
+      || config.entity !== this._config.entity
+      || config.map_entity !== this._config.map_entity;
     this._config = { ...config };
-    this._render();
+    if (needsRender) this._render();
   }
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    // Only render once; after that hass updates don't change the editor UI
+    if (!this._rendered) this._render();
   }
 
   _getVacuumEntities() {
@@ -1459,7 +2068,23 @@ class DreameVacuumMapCardEditor extends HTMLElement {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  _getCameraEntityId() {
+    const entity = this._config.entity || "";
+    if (this._config.map_entity) return this._config.map_entity;
+    const base = entity.replace("vacuum.", "").replace(/_vacuum$/, "");
+    return base ? `camera.${base}_map` : "";
+  }
+
+  _getRooms() {
+    if (!this._hass) return {};
+    const camId = this._getCameraEntityId();
+    const cam = camId ? this._hass.states[camId] : null;
+    return cam?.attributes?.rooms || {};
+  }
+
   _render() {
+    if (!this._hass) return;
+
     const vacuums = this._getVacuumEntities();
     const maps = this._getMapEntities();
     const currentEntity = this._config.entity || "";
@@ -1484,6 +2109,28 @@ class DreameVacuumMapCardEditor extends HTMLElement {
       const selected = m.id === currentMap ? "selected" : "";
       return `<option value="${m.id}" ${selected}>${m.name}</option>`;
     }).join("");
+
+    // Room aliases
+    const rooms = this._getRooms();
+    const aliases = this._config.room_aliases || {};
+    const roomEntries = Object.entries(rooms).sort(([, a], [, b]) => a.name.localeCompare(b.name));
+    const hiddenRooms = this._config.hidden_rooms || [];
+    const roomAliasesHtml = roomEntries.length > 0
+      ? roomEntries.map(([segId, room]) => {
+          const alias = aliases[segId] || "";
+          const hidden = hiddenRooms.includes(parseInt(segId, 10));
+          return `
+            <div class="alias-row ${hidden ? "alias-hidden" : ""}">
+              <span class="alias-room-name">${room.name}</span>
+              <input type="text" class="alias-input" data-seg-id="${segId}"
+                placeholder="${room.name}" value="${alias}" />
+              <button class="alias-vis-btn" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}">
+                <ha-icon icon="${hidden ? "mdi:eye-off" : "mdi:eye"}"></ha-icon>
+              </button>
+            </div>
+          `;
+        }).join("")
+      : '<div class="hint">No rooms detected yet. Rooms will appear here after the map loads.</div>';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -1510,6 +2157,58 @@ class DreameVacuumMapCardEditor extends HTMLElement {
           cursor: pointer;
         }
         .hint { font-size: 12px; color: var(--secondary-text-color, #888); margin-top: 4px; }
+        .section-label {
+          font-weight: 600;
+          font-size: 14px;
+          color: var(--primary-text-color, #1a1a1a);
+          margin: 16px 0 8px;
+          padding-top: 12px;
+          border-top: 1px solid var(--divider-color, #eee);
+        }
+        .alias-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 8px;
+        }
+        .alias-room-name {
+          font-size: 13px;
+          color: var(--secondary-text-color, #888);
+          min-width: 70px;
+          flex-shrink: 0;
+        }
+        .alias-input {
+          flex: 1;
+        }
+        .alias-vis-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 8px;
+          border-radius: 6px;
+          color: var(--secondary-text-color, #888);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          min-width: 36px;
+          min-height: 36px;
+          position: relative;
+          z-index: 1;
+        }
+        .alias-vis-btn:hover {
+          background: var(--divider-color, #eee);
+        }
+        .alias-vis-btn ha-icon {
+          --mdc-icon-size: 20px;
+          pointer-events: none;
+        }
+        .alias-row.alias-hidden {
+          opacity: 0.45;
+        }
+        .alias-row.alias-hidden .alias-input {
+          text-decoration: line-through;
+        }
       </style>
       <div class="editor">
         <div class="field">
@@ -1528,6 +2227,9 @@ class DreameVacuumMapCardEditor extends HTMLElement {
           </select>
           <div class="hint">Leave on auto-detect unless you have multiple maps</div>
         </div>
+        <div class="section-label">Room Names</div>
+        <div class="hint" style="margin-bottom:8px">Override the default room names from the vacuum</div>
+        ${roomAliasesHtml}
       </div>
     `;
 
@@ -1546,6 +2248,46 @@ class DreameVacuumMapCardEditor extends HTMLElement {
       }
       fireEvent(this, "config-changed", { config: this._config });
     });
+
+    this.shadowRoot.querySelectorAll(".alias-input").forEach((input) => {
+      input.addEventListener("input", (e) => {
+        const segId = e.target.dataset.segId;
+        const val = e.target.value.trim();
+        const aliases = { ...(this._config.room_aliases || {}) };
+        if (val) {
+          aliases[segId] = val;
+        } else {
+          delete aliases[segId];
+        }
+        this._config = { ...this._config, room_aliases: aliases };
+        fireEvent(this, "config-changed", { config: this._config });
+      });
+    });
+
+    this.shadowRoot.querySelectorAll(".alias-vis-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const segId = parseInt(btn.dataset.segId, 10);
+        const hidden = [...(this._config.hidden_rooms || [])];
+        const idx = hidden.indexOf(segId);
+        const isNowHidden = idx < 0;
+        if (idx >= 0) {
+          hidden.splice(idx, 1);
+        } else {
+          hidden.push(segId);
+        }
+        // Update DOM directly since editor uses render-once
+        const icon = btn.querySelector("ha-icon");
+        if (icon) icon.setAttribute("icon", isNowHidden ? "mdi:eye-off" : "mdi:eye");
+        btn.title = isNowHidden ? "Show room" : "Hide room";
+        const row = btn.closest(".alias-row");
+        if (row) row.classList.toggle("alias-hidden", isNowHidden);
+
+        this._config = { ...this._config, hidden_rooms: hidden };
+        fireEvent(this, "config-changed", { config: this._config });
+      });
+    });
+
+    this._rendered = true;
   }
 }
 
