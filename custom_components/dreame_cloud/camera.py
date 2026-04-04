@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import logging
+import struct
+import zlib
 from typing import Any
 
 import numpy as np
@@ -250,7 +253,14 @@ def _transform_no_go_zones(
     result = []
     for zone in zones:
         roi = zone.get("roi", []) if isinstance(zone, dict) else zone
-        if not isinstance(roi, list) or len(roi) != 8:
+        if not isinstance(roi, list):
+            continue
+        # Saved map uses 5-value format [x1,y1,x2,y2,flag] (2 corners).
+        # Expand to 8-value format [x1,y1,x2,y1,x2,y2,x1,y2] (4 corners).
+        if len(roi) >= 4 and len(roi) < 8:
+            x1, y1, x2, y2 = roi[0], roi[1], roi[2], roi[3]
+            roi = [x1, y1, x2, y1, x2, y2, x1, y2]
+        elif len(roi) != 8:
             continue
         points = []
         for i in range(0, 8, 2):
@@ -606,10 +616,6 @@ def _decode_rism_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     Decode pipeline: URL-safe base64 -> zlib decompress -> skip 27-byte
     header + pixel grid -> parse trailing JSON.
     """
-    import base64 as _b64
-    import struct as _struct
-    import zlib as _zlib
-
     rism = metadata.get("rism")
     if not rism or not isinstance(rism, str):
         return {}
@@ -619,15 +625,15 @@ def _decode_rism_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         pad = 4 - (len(b64) % 4)
         if pad != 4:
             b64 += "=" * pad
-        decoded = _b64.b64decode(b64)
-        decompressed = _zlib.decompress(decoded)
+        decoded = base64.b64decode(b64)
+        decompressed = zlib.decompress(decoded)
 
         # Skip 27-byte header, then width*height pixel bytes
         hdr_fmt = "<2hb11h"
-        hdr_size = _struct.calcsize(hdr_fmt)  # 27
+        hdr_size = struct.calcsize(hdr_fmt)  # 27
         if len(decompressed) < hdr_size:
             return {}
-        vals = _struct.unpack_from(hdr_fmt, decompressed)
+        vals = struct.unpack_from(hdr_fmt, decompressed)
         width, height = vals[10], vals[11]
         pixel_end = hdr_size + width * height
         if len(decompressed) <= pixel_end:
@@ -750,12 +756,6 @@ def _render_map(
             else None
         ),
         "rooms": room_bboxes,
-        "no_go_zones": _transform_no_go_zones(
-            map_data.raw_metadata, header, w, h, flip_x, flip_y, rotation, scale,
-        ),
-        "virtual_walls": _transform_virtual_walls(
-            map_data.raw_metadata, header, w, h, flip_x, flip_y, rotation, scale,
-        ),
         "furniture": _transform_furniture(
             map_data.raw_metadata, header, w, h, flip_x, flip_y, rotation, scale,
         ),
@@ -769,52 +769,49 @@ def _render_map(
         ),
     }
 
-    # Thresholds (vws key): passable, impassable, ramps, cliffs
-    # DEBUG: expose raw vws data as attribute for investigation
     # The live map frame (req_type=1) often lacks zone config data like
     # vws (thresholds) and vw (no-go/virtual walls).  This data lives in
     # the saved map embedded in the "rism" metadata key.  Decode it to
     # get the authoritative zone configuration.
     saved_meta = _decode_rism_metadata(map_data.raw_metadata)
 
-    # Merge saved-map zones into live map attributes.  The live map's
-    # vw/vws take precedence if present; fall back to saved map data.
-    effective_meta = map_data.raw_metadata
+    # Merge saved-map zones into live metadata.  The live map's vw/vws
+    # take precedence if present; fall back to saved map data.
     if saved_meta:
+        effective_meta = dict(map_data.raw_metadata)
         for zone_key in ("vw", "vws"):
             if not effective_meta.get(zone_key) and saved_meta.get(zone_key):
-                effective_meta = {**effective_meta, zone_key: saved_meta[zone_key]}
-
-    # Re-compute no-go zones and virtual walls from merged metadata
-    attrs["no_go_zones"] = _transform_no_go_zones(
-        effective_meta, header, w, h, flip_x, flip_y, rotation, scale,
-    )
-    attrs["virtual_walls"] = _transform_virtual_walls(
-        effective_meta, header, w, h, flip_x, flip_y, rotation, scale,
-    )
+                effective_meta[zone_key] = saved_meta[zone_key]
+    else:
+        effective_meta = map_data.raw_metadata
 
     transform_args = (header, w, h, flip_x, flip_y, rotation, scale)
 
+    attrs["no_go_zones"] = _transform_no_go_zones(
+        effective_meta, *transform_args,
+    )
+    attrs["virtual_walls"] = _transform_virtual_walls(
+        effective_meta, *transform_args,
+    )
+
     # Thresholds from vws: passable (vwsl), impassable (npthrsd), ramps
     vws = effective_meta.get("vws", {})
-    if isinstance(vws, dict) and vws:
-        has_impassable = bool(vws.get("npthrsd"))
-        attrs["passable_thresholds"] = _transform_threshold_lines(
-            vws, "vwsl", *transform_args,
-        )
-        attrs["impassable_thresholds"] = _transform_threshold_lines(
-            vws, "npthrsd", *transform_args,
-        ) if has_impassable else []
-        attrs["ramps"] = _transform_ramps(vws, *transform_args)
+    if not isinstance(vws, dict):
+        vws = {}
+    attrs["passable_thresholds"] = _transform_threshold_lines(
+        vws, "vwsl", *transform_args,
+    )
+    attrs["impassable_thresholds"] = _transform_threshold_lines(
+        vws, "npthrsd", *transform_args,
+    )
+    attrs["ramps"] = _transform_ramps(vws, *transform_args)
 
     # Cliffs live under vw.cliff, not vws
     vw = effective_meta.get("vw", {})
-    if isinstance(vw, dict):
-        cliff_lines = vw.get("cliff", [])
-        if cliff_lines:
-            # Wrap in a dict so _transform_threshold_lines can extract the sub-key
-            attrs["cliffs"] = _transform_threshold_lines(
-                {"cliff": cliff_lines}, "cliff", *transform_args,
-            )
+    if not isinstance(vw, dict):
+        vw = {}
+    attrs["cliffs"] = _transform_threshold_lines(
+        {"cliff": vw.get("cliff", [])}, "cliff", *transform_args,
+    )
 
     return buf.getvalue(), attrs

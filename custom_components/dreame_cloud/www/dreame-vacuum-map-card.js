@@ -1386,30 +1386,16 @@ class DreameVacuumMapCard extends HTMLElement {
         low_clearance_zones: buildZonePayload(this._editLowClearanceZones),
       };
 
-      // Include threshold data if any exist
-      const hasThresholds = this._editPassableThresholds.length > 0
-        || this._editImpassableThresholds.length > 0
-        || this._editRamps.length > 0
-        || this._editCliffs.length > 0;
-      if (hasThresholds) {
-        const vws = {};
-        if (this._editPassableThresholds.length > 0) {
-          vws.vwsl = this._editPassableThresholds.map((t) => t.vacuum_coords);
-        }
-        if (this._editImpassableThresholds.length > 0) {
-          vws.npthrsd = this._editImpassableThresholds.map((t) => t.vacuum_coords);
-        }
-        if (this._editRamps.length > 0) {
-          vws.ramp = this._editRamps.map((r) => {
-            const vc = r.vacuum_coords || [];
-            return r.type != null ? [...vc, r.type] : vc;
-          });
-        }
-        if (this._editCliffs.length > 0) {
-          vws.cliff = this._editCliffs.map((t) => t.vacuum_coords);
-        }
-        serviceData.thresholds = vws;
-      }
+      // Always send thresholds so deletions persist
+      serviceData.thresholds = {
+        vwsl: this._editPassableThresholds.map((t) => t.vacuum_coords),
+        npthrsd: this._editImpassableThresholds.map((t) => t.vacuum_coords),
+        ramp: this._editRamps.map((r) => {
+          const vc = r.vacuum_coords || [];
+          return r.type != null ? [...vc, r.type] : vc;
+        }),
+        cliff: this._editCliffs.map((t) => t.vacuum_coords),
+      };
 
       await this._hass.callService("dreame_cloud", "update_map", serviceData);
       this._mode = "all";

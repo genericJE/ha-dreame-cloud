@@ -307,7 +307,14 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             update["sneak_areas"] = low_clearance_zones
 
         if thresholds is not None:
-            update["vws"] = thresholds
+            # Cliffs belong under vw, not vws (the camera reads vw.cliff)
+            cliff = thresholds.get("cliff")
+            if cliff is not None:
+                vw["cliff"] = cliff
+                update["vw"] = vw
+            vws_data = {k: v for k, v in thresholds.items() if k != "cliff"}
+            if vws_data:
+                update["vws"] = vws_data
 
         if not update:
             return
