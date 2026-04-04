@@ -33,7 +33,9 @@ The trailing JSON contains these zone-related keys:
 | `sneak_areas_end` | Same as sneak_areas + `area`, `ms` fields | End-of-clean snapshot with timing data |
 | `vw` | `{line: [[x1,y1,x2,y2],...], rect: [...], mop: [...]}` | Virtual walls (line), no-go zones (rect), no-mop zones (mop). Currently absent on this vacuum. |
 | `ai_outborders_user` | User-defined out-of-bounds | Currently empty |
-| `ai_furniture_user` | `[[x, y, type, ...]]` | Detected/confirmed furniture |
+| `ai_furniture` | `[[cx, cy, type, flag, cx2, cy2, w, h], ...]` | AI-detected furniture (8 values per item) |
+| `ai_furniture_user` | `[[cx, cy, type, flag, cx2, cy2, w, h, user_flag], ...]` | User-confirmed furniture (9 values, adds user_flag) |
+| `ai_furniture_new` | (null on this device) | Newly detected furniture not yet confirmed |
 | `carpetcleanset` | `[[mode, room, ...]]` | Per-room carpet cleaning settings (not zones) |
 | `cleanset` | `{"room_id": [settings...]}` (JSON string) | Per-room cleaning parameters |
 | `seg_inf` | `{"id": {name, type, roomID, nei_id}}` | Room info (names are base64). Not always present in every frame. |
@@ -113,6 +115,50 @@ curl -s -X POST http://homeassistant.local:8123/api/services/homeassistant/resta
 Entity IDs are derived from the device name, not the integration domain:
 - `vacuum.x50_ultra_complete_vacuum` (not `vacuum.dreame_cloud_vacuum`)
 - `camera.x50_ultra_complete_map` (not `camera.dreame_cloud_vacuum_map`)
+
+## Furniture detection
+
+The vacuum's AI detects furniture and stores it in three metadata keys:
+
+- `ai_furniture` — auto-detected items (8 values per item)
+- `ai_furniture_user` — user-confirmed items (9 values, appends `user_flag`)
+- `ai_furniture_new` — newly detected items pending confirmation (null when empty)
+
+### Item array format
+
+```
+[cx, cy, type, flag, cx2, cy2, width, height, user_flag?]
+```
+
+- `cx, cy` and `cx2, cy2`: identical center coordinates in vacuum coords (mm)
+- `type`: furniture type ID (see FurnitureType enum below)
+- `flag`: always 0 in observed data
+- `width, height`: dimensions in vacuum coords (mm)
+- `user_flag` (index 8, only in `ai_furniture_user`): always 0 in observed data
+
+### FurnitureType enum (from Dreame firmware)
+
+| ID | Name | ID | Name |
+|----|------|----|------|
+| 1 | Single Bed | 14 | Refrigerator |
+| 2 | Double Bed | 15 | Washing Machine |
+| 3 | Armchair | 16 | Enclosed Litter Box |
+| 4 | Two Seat Sofa | 17 | Air Conditioner |
+| 5 | Three Seat Sofa | 18 | TV Cabinet |
+| 6 | Dining Table | 19 | Bookshelf |
+| 7 | Nightstand | 20 | Shoe Cabinet |
+| 8 | Coffee Table | 21 | Wardrobe |
+| 9 | Toilet | 22 | Greenery |
+| 10 | Litter Box | 23 | Floor Mirror |
+| 11 | Pet Bed | 24 | L-Shaped Sofa |
+| 12 | Food Bowl | 25 | Round Coffee Table |
+| 13 | Pet Toilet | 26 | Table |
+
+Source: Tasshack/dreame-vacuum dev branch `FurnitureType` enum. Types 27-31 exist on newer models (armchairs, multi-seat sofas) but are not yet mapped.
+
+### Current rendering
+
+`camera.py` transforms `ai_furniture_user` items to image coordinates and exposes them as entity attributes. The JS card draws dashed rectangles with centered name labels. No editing support yet (place, move, resize, rotate, delete).
 
 ## Zone editing data flow
 
