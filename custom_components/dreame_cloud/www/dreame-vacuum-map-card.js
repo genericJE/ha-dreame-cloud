@@ -940,7 +940,7 @@ class DreameVacuumMapCard extends HTMLElement {
       curW = rawW;
       curH = rawH;
     }
-    for (let i = 0; i < (360 - rotation) % 360 / 90; i++) {
+    for (let i = 0; i < rotation / 90; i++) {
       const newX = y;
       const newY = curW - 1 - x;
       x = newX;
