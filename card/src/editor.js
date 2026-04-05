@@ -104,7 +104,7 @@ export class DreameVacuumMapCardEditor extends HTMLElement {
               <span class="alias-room-name">${room.name}</span>
               <input type="text" class="alias-input" data-seg-id="${segId}"
                 placeholder="${room.name}" value="${alias}" />
-              <button class="alias-vis-btn" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}">
+              <button class="alias-vis-btn" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}" aria-label="${hidden ? "Show room" : "Hide room"}">
                 <ha-icon icon="${hidden ? "mdi:eye-off" : "mdi:eye"}"></ha-icon>
               </button>
             </div>

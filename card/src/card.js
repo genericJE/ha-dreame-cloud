@@ -264,7 +264,6 @@ class DreameVacuumMapCard extends HTMLElement {
     this._updateMap(card);
     this._updateModeTabs(card);
     this._updateRoomList(card);
-    this._updateConfigSection(card);
     this._updateActions(card);
     // Only rebuild settings panel when toggling open/close, not on every hass update.
     // This prevents races where a service call re-renders the panel before HA
@@ -317,13 +316,13 @@ class DreameVacuumMapCard extends HTMLElement {
             <ha-icon icon="${battIcon}"></ha-icon>
             <span>${battery}%</span>
           </div>
-          <button class="header-icon-btn ${this._mode === "goto" ? "active" : ""}" data-mode="goto" title="Go To">
+          <button class="header-icon-btn ${this._mode === "goto" ? "active" : ""}" data-mode="goto" title="Go To" aria-label="Go To">
             <ha-icon icon="mdi:map-marker"></ha-icon>
           </button>
-          <button class="header-icon-btn ${this._mode === "edit" ? "active" : ""}" data-mode="edit" title="Edit Map">
+          <button class="header-icon-btn ${this._mode === "edit" ? "active" : ""}" data-mode="edit" title="Edit Map" aria-label="Edit Map">
             <ha-icon icon="mdi:pencil"></ha-icon>
           </button>
-          <button class="settings-btn" title="Settings">
+          <button class="settings-btn" title="Settings" aria-label="Settings">
             <ha-icon icon="mdi:cog"></ha-icon>
           </button>
         </div>
@@ -1633,10 +1632,10 @@ class DreameVacuumMapCard extends HTMLElement {
     // Toggle button for list/map view
     const viewToggle = `
       <div class="room-view-toggle">
-        <button class="view-btn ${this._roomView === "map" ? "active" : ""}" data-view="map">
+        <button class="view-btn ${this._roomView === "map" ? "active" : ""}" data-view="map" aria-label="Map view">
           <ha-icon icon="mdi:map"></ha-icon>
         </button>
-        <button class="view-btn ${this._roomView === "list" ? "active" : ""}" data-view="list">
+        <button class="view-btn ${this._roomView === "list" ? "active" : ""}" data-view="list" aria-label="List view">
           <ha-icon icon="mdi:format-list-bulleted"></ha-icon>
         </button>
       </div>
@@ -1701,11 +1700,6 @@ class DreameVacuumMapCard extends HTMLElement {
         this._updateContent();
       });
     });
-  }
-
-  _updateConfigSection(card) {
-    const section = card.querySelector(".config-section");
-    section.innerHTML = "";
   }
 
   _updateActions(card) {
@@ -2080,7 +2074,7 @@ class DreameVacuumMapCard extends HTMLElement {
               <span class="settings-alias-name">${room.name}</span>
               <input type="text" class="settings-alias-input" data-seg-id="${segId}"
                 placeholder="${room.name}" value="${alias}" />
-              <button class="settings-alias-vis" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}">
+              <button class="settings-alias-vis" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}" aria-label="${hidden ? "Show room" : "Hide room"}">
                 <ha-icon icon="${hidden ? "mdi:eye-off" : "mdi:eye"}"></ha-icon>
               </button>
             </div>
@@ -2091,7 +2085,7 @@ class DreameVacuumMapCard extends HTMLElement {
     panel.innerHTML = `
       <div class="settings-header">
         <span>Settings</span>
-        <button class="close-settings">
+        <button class="close-settings" aria-label="Close settings">
           <ha-icon icon="mdi:close"></ha-icon>
         </button>
       </div>
