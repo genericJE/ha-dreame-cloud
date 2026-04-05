@@ -107,7 +107,7 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
             options.get(CONF_MAP_FLIP_X, False),
             options.get(CONF_MAP_FLIP_Y, False),
         )
-        pending = self.coordinator._pending_zone_update  # noqa: SLF001
+        pending = self.coordinator.pending_zone_update
         pending_changed = pending is not self._last_pending
         if frame_id != self._last_frame_id or opts_key != self._last_opts or pending_changed:
             self._image, self._map_attrs = await self.hass.async_add_executor_job(

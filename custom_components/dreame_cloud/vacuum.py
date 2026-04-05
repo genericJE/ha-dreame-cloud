@@ -333,9 +333,9 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         )
         # Cache the sent zone data so camera.py uses it instead of
         # stale rism data until the cloud updates the saved map blob.
-        self.coordinator._pending_zone_update = update  # noqa: SLF001
+        self.coordinator.set_pending_zone_update(update)
         # Force next refresh to re-fetch map data (bypass idle throttle)
-        self.coordinator._last_map_update = 0  # noqa: SLF001
+        self.coordinator.reset_map_cache()
         await self.coordinator.async_request_refresh()
 
     async def async_clean_zone(
@@ -405,7 +405,7 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             req_type, len(map_data.rooms), len(meta_keys), meta_keys,
         )
         # Update the coordinator's cached map data so the camera renders it
-        self.coordinator._map_data = map_data  # noqa: SLF001
+        self.coordinator.set_map_data(map_data)
         await self.coordinator.async_request_refresh()
 
     @property

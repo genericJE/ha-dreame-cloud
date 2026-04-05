@@ -192,6 +192,27 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             self._connected = False
             raise UpdateFailed(f"Update failed: {err}") from err
 
+    @property
+    def pending_zone_update(self) -> dict | None:
+        """Return the pending zone update overlay (used by camera rendering)."""
+        return self._pending_zone_update
+
+    def set_pending_zone_update(self, update: dict | None) -> None:
+        """Cache zone data sent to the vacuum for immediate rendering.
+
+        The cloud's saved map blob (rism) updates lazily, so the camera
+        uses this overlay to show the user's edits immediately.
+        """
+        self._pending_zone_update = update
+
+    def reset_map_cache(self) -> None:
+        """Force the next refresh to re-fetch map data (bypass idle throttle)."""
+        self._last_map_update = 0
+
+    def set_map_data(self, map_data: DreameMap) -> None:
+        """Replace the cached map data (used by request_map for investigation)."""
+        self._map_data = map_data
+
     async def async_disconnect(self) -> None:
         """Disconnect from the cloud."""
         await self._cloud.disconnect()
