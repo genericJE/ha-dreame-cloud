@@ -650,6 +650,7 @@
       .volume-slider {
         flex: 1;
         -webkit-appearance: none;
+        appearance: none;
         height: 6px;
         background: var(--surface);
         border-radius: 3px;
@@ -662,6 +663,14 @@
         background: var(--accent);
         border-radius: 50%;
         cursor: pointer;
+      }
+      .volume-slider::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        background: var(--accent);
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
       }
       .volume-value {
         min-width: 28px;
@@ -980,7 +989,7 @@
               <span class="alias-room-name">${room.name}</span>
               <input type="text" class="alias-input" data-seg-id="${segId}"
                 placeholder="${room.name}" value="${alias}" />
-              <button class="alias-vis-btn" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}">
+              <button class="alias-vis-btn" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}" aria-label="${hidden ? "Show room" : "Hide room"}">
                 <ha-icon icon="${hidden ? "mdi:eye-off" : "mdi:eye"}"></ha-icon>
               </button>
             </div>
@@ -1364,7 +1373,6 @@
       this._updateMap(card);
       this._updateModeTabs(card);
       this._updateRoomList(card);
-      this._updateConfigSection(card);
       this._updateActions(card);
       if (!this._settingsOpen) {
         this._updateSettingsPanel(card);
@@ -1408,13 +1416,13 @@
             <ha-icon icon="${battIcon}"></ha-icon>
             <span>${battery}%</span>
           </div>
-          <button class="header-icon-btn ${this._mode === "goto" ? "active" : ""}" data-mode="goto" title="Go To">
+          <button class="header-icon-btn ${this._mode === "goto" ? "active" : ""}" data-mode="goto" title="Go To" aria-label="Go To">
             <ha-icon icon="mdi:map-marker"></ha-icon>
           </button>
-          <button class="header-icon-btn ${this._mode === "edit" ? "active" : ""}" data-mode="edit" title="Edit Map">
+          <button class="header-icon-btn ${this._mode === "edit" ? "active" : ""}" data-mode="edit" title="Edit Map" aria-label="Edit Map">
             <ha-icon icon="mdi:pencil"></ha-icon>
           </button>
-          <button class="settings-btn" title="Settings">
+          <button class="settings-btn" title="Settings" aria-label="Settings">
             <ha-icon icon="mdi:cog"></ha-icon>
           </button>
         </div>
@@ -2584,10 +2592,10 @@
       }
       const viewToggle = `
       <div class="room-view-toggle">
-        <button class="view-btn ${this._roomView === "map" ? "active" : ""}" data-view="map">
+        <button class="view-btn ${this._roomView === "map" ? "active" : ""}" data-view="map" aria-label="Map view">
           <ha-icon icon="mdi:map"></ha-icon>
         </button>
-        <button class="view-btn ${this._roomView === "list" ? "active" : ""}" data-view="list">
+        <button class="view-btn ${this._roomView === "list" ? "active" : ""}" data-view="list" aria-label="List view">
           <ha-icon icon="mdi:format-list-bulleted"></ha-icon>
         </button>
       </div>
@@ -2637,10 +2645,6 @@
           this._updateContent();
         });
       });
-    }
-    _updateConfigSection(card) {
-      const section = card.querySelector(".config-section");
-      section.innerHTML = "";
     }
     _updateActions(card) {
       const actions = card.querySelector(".actions");
@@ -2968,7 +2972,7 @@
               <span class="settings-alias-name">${room.name}</span>
               <input type="text" class="settings-alias-input" data-seg-id="${segId}"
                 placeholder="${room.name}" value="${alias}" />
-              <button class="settings-alias-vis" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}">
+              <button class="settings-alias-vis" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}" aria-label="${hidden ? "Show room" : "Hide room"}">
                 <ha-icon icon="${hidden ? "mdi:eye-off" : "mdi:eye"}"></ha-icon>
               </button>
             </div>
@@ -2977,7 +2981,7 @@
       panel.innerHTML = `
       <div class="settings-header">
         <span>Settings</span>
-        <button class="close-settings">
+        <button class="close-settings" aria-label="Close settings">
           <ha-icon icon="mdi:close"></ha-icon>
         </button>
       </div>

@@ -509,6 +509,7 @@ export function getStyles() {
       .volume-slider {
         flex: 1;
         -webkit-appearance: none;
+        appearance: none;
         height: 6px;
         background: var(--surface);
         border-radius: 3px;
@@ -521,6 +522,14 @@ export function getStyles() {
         background: var(--accent);
         border-radius: 50%;
         cursor: pointer;
+      }
+      .volume-slider::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        background: var(--accent);
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
       }
       .volume-value {
         min-width: 28px;
