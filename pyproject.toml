@@ -1,6 +1,6 @@
 [project]
 name = "ha-dreame-cloud"
-version = "0.3.1"
+version = "0.3.2"
 description = "Dreame Cloud Vacuum integration for Home Assistant"
 requires-python = ">=3.13,<3.14"
 dependencies = [
