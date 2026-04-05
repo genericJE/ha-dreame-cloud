@@ -73,7 +73,8 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     @property
     def device(self) -> DreameDevice:
         """Return the device."""
-        assert self._device is not None
+        if self._device is None:
+            raise RuntimeError("Device not initialized; coordinator setup has not completed")
         return self._device
 
     @property
