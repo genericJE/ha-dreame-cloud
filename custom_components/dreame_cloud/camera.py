@@ -8,7 +8,7 @@ import json
 import logging
 import struct
 import zlib
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from homeassistant.components.camera import Camera
@@ -58,7 +58,7 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
         self._map_attrs: dict[str, Any] = {}
         self._last_frame_id: int | None = None
         self._last_opts: tuple[int, bool, bool] | None = None
-        self._last_pending: dict | None = None
+        self._last_pending: dict[str, Any] | None = None
 
     async def async_added_to_hass(self) -> None:
         """Register for option updates when added to hass."""
@@ -251,34 +251,36 @@ def _transform_no_go_zones(
     No-go zones use the ``vw.rect`` key in the Dreame protocol. This is
     distinct from ``sneak_areas`` which are low-clearance/low-lying zones.
     """
-    vw = metadata.get("vw", {})
+    vw: Any = metadata.get("vw", {})
     zones: list[Any] = []
     if isinstance(vw, dict):
-        zones = vw.get("rect", [])
+        vw_d = cast(dict[str, Any], vw)
+        zones = cast(list[Any], vw_d.get("rect", []))
     # Flat list format: vw is [x1,y1,x2,y2,...] line segments, not zones
     if not zones:
         return []
 
-    result = []
+    result: list[dict[str, Any]] = []
     for zone in zones:
-        roi = zone.get("roi", []) if isinstance(zone, dict) else zone
-        if not isinstance(roi, list):
+        zone_d = cast(dict[str, Any], zone) if isinstance(zone, dict) else None
+        roi: list[int] = cast(list[int], zone_d.get("roi", [])) if zone_d else cast(list[int], zone)
+        if not isinstance(roi, list):  # pyright: ignore[reportUnnecessaryIsInstance]
             continue
         # Saved map uses 5-value format [x1,y1,x2,y2,flag] (2 corners).
         # Expand to 8-value format [x1,y1,x2,y1,x2,y2,x1,y2] (4 corners).
         if len(roi) >= 4 and len(roi) < 8:
-            x1, y1, x2, y2 = roi[0], roi[1], roi[2], roi[3]
+            x1, y1, x2, y2 = int(roi[0]), int(roi[1]), int(roi[2]), int(roi[3])
             roi = [x1, y1, x2, y1, x2, y2, x1, y2]
         elif len(roi) != 8:
             continue
-        points = []
+        points: list[dict[str, int]] = []
         for i in range(0, 8, 2):
             ix, iy = _vacuum_to_image(
-                roi[i], roi[i + 1], header, w, h, flip_x, flip_y, rotation, scale,
+                int(roi[i]), int(roi[i + 1]), header, w, h, flip_x, flip_y, rotation, scale,
             )
             points.append({"x": ix, "y": iy})
         result.append({
-            "id": zone.get("id") if isinstance(zone, dict) else None,
+            "id": zone_d.get("id") if zone_d else None,
             "points": points,
             "roi": roi,
         })
@@ -299,21 +301,26 @@ def _transform_virtual_walls(
     walls: list[dict[str, Any]] = []
 
     # Virtual wall lines from "vw.line" (Dreame protocol)
-    vw = metadata.get("vw", {})
+    vw: Any = metadata.get("vw", {})
     line_list: list[Any] = []
     if isinstance(vw, dict):
-        line_list = vw.get("line", [])
+        vw_d = cast(dict[str, Any], vw)
+        line_list = cast(list[Any], vw_d.get("line", []))
     elif isinstance(vw, list):
         # Legacy flat format: each entry is [x1, y1, x2, y2]
-        line_list = vw
+        line_list = cast(list[Any], vw)
 
-    for wall in line_list:
-        if isinstance(wall, list) and len(wall) >= 4:
+    for wall_raw in line_list:
+        if not isinstance(wall_raw, list):
+            continue
+        wall: list[Any] = cast(list[Any], wall_raw)
+        if len(wall) >= 4:
+            wall: list[Any] = cast(list[Any], wall_raw)
             p1 = _vacuum_to_image(
-                wall[0], wall[1], header, w, h, flip_x, flip_y, rotation, scale,
+                int(wall[0]), int(wall[1]), header, w, h, flip_x, flip_y, rotation, scale,
             )
             p2 = _vacuum_to_image(
-                wall[2], wall[3], header, w, h, flip_x, flip_y, rotation, scale,
+                int(wall[2]), int(wall[3]), header, w, h, flip_x, flip_y, rotation, scale,
             )
             walls.append({
                 "x1": p1[0], "y1": p1[1],
@@ -322,15 +329,17 @@ def _transform_virtual_walls(
             })
 
     # User-defined outborders
-    for border in metadata.get("ai_outborders_user", []):
+    borders: list[Any] = cast(list[Any], metadata.get("ai_outborders_user", []))
+    for border in borders:
         if isinstance(border, dict):
-            roi = border.get("roi", [])
+            border_d = cast(dict[str, Any], border)
+            roi: list[int] = cast(list[int], border_d.get("roi", []))
             if len(roi) >= 4:
                 p1 = _vacuum_to_image(
-                    roi[0], roi[1], header, w, h, flip_x, flip_y, rotation, scale,
+                    int(roi[0]), int(roi[1]), header, w, h, flip_x, flip_y, rotation, scale,
                 )
                 p2 = _vacuum_to_image(
-                    roi[2], roi[3], header, w, h, flip_x, flip_y, rotation, scale,
+                    int(roi[2]), int(roi[3]), header, w, h, flip_x, flip_y, rotation, scale,
                 )
                 walls.append({
                     "x1": p1[0], "y1": p1[1],
@@ -353,27 +362,30 @@ def _transform_rect_zones(
     scale: int,
 ) -> list[dict[str, Any]]:
     """Transform rectangular zones (same format as sneak_areas) to image coords."""
-    zones = metadata.get(key, [])
+    zones: list[Any] = cast(list[Any], metadata.get(key, []))
     if not zones:
         return []
 
-    result = []
+    result: list[dict[str, Any]] = []
     for zone in zones:
-        # hide: 0 = visible, 1 = auto-hidden, 2 = manually hidden
-        if zone.get("hide", 0):
+        if not isinstance(zone, dict):
             continue
-        roi = zone.get("roi", [])
+        zone_d = cast(dict[str, Any], zone)
+        # hide: 0 = visible, 1 = auto-hidden, 2 = manually hidden
+        if zone_d.get("hide", 0):
+            continue
+        roi: list[int] = cast(list[int], zone_d.get("roi", []))
         if len(roi) != 8:
             continue
-        points = []
+        points: list[dict[str, int]] = []
         for i in range(0, 8, 2):
             ix, iy = _vacuum_to_image(
-                roi[i], roi[i + 1], header, w, h, flip_x, flip_y, rotation, scale,
+                int(roi[i]), int(roi[i + 1]), header, w, h, flip_x, flip_y, rotation, scale,
             )
             points.append({"x": ix, "y": iy})
         result.append({
-            "id": zone.get("id"),
-            "type": zone.get("type", 0),  # 0 = auto-detected, 1 = manual
+            "id": cast(int | None, zone_d.get("id")),
+            "type": cast(int, zone_d.get("type", 0)),  # 0 = auto-detected, 1 = manual
             "points": points,
             "roi": roi,
         })
@@ -381,7 +393,7 @@ def _transform_rect_zones(
 
 
 def _compute_carpet_zones(
-    pixel_array: np.ndarray,
+    pixel_array: np.ndarray[Any, Any],
     w: int,
     h: int,
     flip_x: bool,
@@ -508,19 +520,22 @@ def _transform_threshold_lines(
     scale: int,
 ) -> list[dict[str, Any]]:
     """Transform threshold line segments (vws.vwsl, vws.npthrsd, vws.cliff) to image coords."""
-    lines = vws.get(sub_key, [])
+    lines: list[Any] = cast(list[Any], vws.get(sub_key, []))
     if not lines:
         return []
 
-    result = []
-    for line in lines:
-        if not isinstance(line, list) or len(line) < 4:
+    result: list[dict[str, Any]] = []
+    for line_raw in lines:
+        if not isinstance(line_raw, list):
+            continue
+        line: list[Any] = cast(list[Any], line_raw)
+        if len(line) < 4:
             continue
         p1 = _vacuum_to_image(
-            line[0], line[1], header, w, h, flip_x, flip_y, rotation, scale,
+            int(line[0]), int(line[1]), header, w, h, flip_x, flip_y, rotation, scale,
         )
         p2 = _vacuum_to_image(
-            line[2], line[3], header, w, h, flip_x, flip_y, rotation, scale,
+            int(line[2]), int(line[3]), header, w, h, flip_x, flip_y, rotation, scale,
         )
         result.append({
             "x1": p1[0], "y1": p1[1],
@@ -545,20 +560,23 @@ def _transform_ramps(
     Each ramp entry is [x1, y1, x2, y2, type] where the coords define a
     rectangular area and type indicates the ramp kind.
     """
-    ramps = vws.get("ramp", [])
+    ramps: list[Any] = cast(list[Any], vws.get("ramp", []))
     if not ramps:
         return []
 
-    result = []
-    for ramp in ramps:
-        if not isinstance(ramp, list) or len(ramp) < 4:
+    result: list[dict[str, Any]] = []
+    for ramp_raw in ramps:
+        if not isinstance(ramp_raw, list):
+            continue
+        ramp: list[Any] = cast(list[Any], ramp_raw)
+        if len(ramp) < 4:
             continue
         # Transform the two corners that define the rectangle
         p1 = _vacuum_to_image(
-            ramp[0], ramp[1], header, w, h, flip_x, flip_y, rotation, scale,
+            int(ramp[0]), int(ramp[1]), header, w, h, flip_x, flip_y, rotation, scale,
         )
         p2 = _vacuum_to_image(
-            ramp[2], ramp[3], header, w, h, flip_x, flip_y, rotation, scale,
+            int(ramp[2]), int(ramp[3]), header, w, h, flip_x, flip_y, rotation, scale,
         )
         x1 = min(p1[0], p2[0])
         y1 = min(p1[1], p2[1])
@@ -588,29 +606,34 @@ def _transform_furniture(
     scale: int,
 ) -> list[dict[str, Any]]:
     """Transform ai_furniture_user to image coordinates."""
-    items = metadata.get("ai_furniture_user", [])
+    items: list[Any] = cast(list[Any], metadata.get("ai_furniture_user", []))
     if not items:
         return []
 
-    result = []
-    for item in items:
-        if not isinstance(item, list) or len(item) < 8:
+    result: list[dict[str, Any]] = []
+    for item_raw in items:
+        if not isinstance(item_raw, list):
+            continue
+        item: list[Any] = cast(list[Any], item_raw)
+        if len(item) < 8:
             continue
         # [cx, cy, type, flag, cx2, cy2, width, height, user_flag?]
-        cx, cy = item[4], item[5]  # center position
-        fw, fh = item[6], item[7]  # dimensions in vacuum coords
-        ftype = item[2]
+        cx: int = int(item[4])
+        cy: int = int(item[5])  # center position
+        fw: int = int(item[6])
+        fh: int = int(item[7])  # dimensions in vacuum coords
+        ftype: int = int(item[2])
 
         # Compute corners and transform
         half_w = fw // 2
         half_h = fh // 2
-        corners = [
+        corners: list[tuple[int, int]] = [
             (cx - half_w, cy - half_h),
             (cx + half_w, cy - half_h),
             (cx + half_w, cy + half_h),
             (cx - half_w, cy + half_h),
         ]
-        points = []
+        points: list[dict[str, int]] = []
         for vx, vy in corners:
             ix, iy = _vacuum_to_image(
                 vx, vy, header, w, h, flip_x, flip_y, rotation, scale,
@@ -618,8 +641,8 @@ def _transform_furniture(
             points.append({"x": ix, "y": iy})
 
         # Compute bounding box from transformed points
-        xs = [p["x"] for p in points]
-        ys = [p["y"] for p in points]
+        xs: list[int] = [p["x"] for p in points]
+        ys: list[int] = [p["y"] for p in points]
 
         result.append({
             "type": ftype,
@@ -846,9 +869,8 @@ def _render_map(
     )
 
     # Thresholds from vws: passable (vwsl), impassable (npthrsd), ramps
-    vws = effective_meta.get("vws", {})
-    if not isinstance(vws, dict):
-        vws = {}
+    vws_raw: Any = effective_meta.get("vws", {})
+    vws: dict[str, Any] = cast(dict[str, Any], vws_raw) if isinstance(vws_raw, dict) else {}
     attrs["passable_thresholds"] = _transform_threshold_lines(
         vws, "vwsl", *transform_args,
     )
@@ -858,9 +880,8 @@ def _render_map(
     attrs["ramps"] = _transform_ramps(vws, *transform_args)
 
     # Cliffs live under vw.cliff, not vws
-    vw = effective_meta.get("vw", {})
-    if not isinstance(vw, dict):
-        vw = {}
+    vw_raw: Any = effective_meta.get("vw", {})
+    vw: dict[str, Any] = cast(dict[str, Any], vw_raw) if isinstance(vw_raw, dict) else {}
     attrs["cliffs"] = _transform_threshold_lines(
         {"cliff": vw.get("cliff", [])}, "cliff", *transform_args,
     )

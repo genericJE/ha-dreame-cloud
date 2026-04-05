@@ -9,7 +9,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.components.vacuum import (
     StateVacuumEntity,
-    VacuumEntityFeature,
+    VacuumEntityFeature,  # pyright: ignore[reportAttributeAccessIssue,reportPrivateImportUsage]
 )
 from homeassistant.components.vacuum.const import VacuumActivity
 from homeassistant.core import HomeAssistant

@@ -11,7 +11,7 @@ class DreameCloud:
         username: str,
         password: str,
         region: str = ...,
-        host: str = ...,
+        host: str | None = ...,
         port: int = ...,
     ) -> None: ...
     async def connect(self) -> None: ...
