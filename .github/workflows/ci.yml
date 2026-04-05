@@ -50,6 +50,11 @@ jobs:
           node-version: "22"
       - run: npm ci
         working-directory: card
+      - name: Syntax-check source modules
+        run: |
+          for f in card/src/*.js; do
+            node --check "$f"
+          done
       - run: npm run build
         working-directory: card
       - run: node --check custom_components/dreame_cloud/www/dreame-vacuum-map-card.js
