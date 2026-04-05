@@ -96,13 +96,29 @@ The rotation inverse step `(x,y) → (y, curW-1-x)` is iterated `rotation/90` ti
 
 ## CI and tooling
 
-GitHub Actions CI runs on push/PR to main:
-- **ruff**: lint with `select = ["ALL"]` minus HA-incompatible rules. Config in `pyproject.toml`.
-- **pyright**: strict mode typecheck (non-blocking, existing violations). Type stubs for `dreame-mocker` are in `stubs/`.
-- **JS syntax**: `node --check` on the map card JS.
-- **version-sync**: verifies `pyproject.toml` and `manifest.json` versions match.
+GitHub Actions CI (`.github/workflows/ci.yml`) runs on every push and PR to `main`. Four parallel jobs:
 
-Dev dependencies: `pyright`, `ruff` (install via `uv sync`).
+| Job | Blocking | What it does |
+|-----|----------|--------------|
+| **lint** | yes | Runs `ruff check` via `astral-sh/ruff-action@v3`. Config is `select = ["ALL"]` in `pyproject.toml` with ignores for rules incompatible with HA conventions (docstrings, boolean traps, type-checking imports, complexity, etc.). |
+| **typecheck** | no | Runs `pyright` in strict mode. Installs public deps plus `dreame-mocker` via HTTPS into a fresh venv. Non-blocking (`continue-on-error: true`) because ~114 strict violations exist, mostly `reportUnknownMemberType` cascading from HA's partially-typed base classes. Type stubs for `dreame-mocker` live in `stubs/` and are used as a fallback when the real package isn't installed. |
+| **js-build** | yes | Syntax-checks each source module in `card/src/*.js`, runs `npm run build` (esbuild), syntax-checks the output bundle, then verifies the committed bundle matches the build output (`git diff --exit-code`). Catches forgotten rebuilds. |
+| **version-sync** | yes | Reads version from both `pyproject.toml` and `manifest.json` and fails if they differ. |
+
+### Local development
+
+```bash
+# Python linting (must pass before push)
+ruff check custom_components/
+
+# Type checking (informational, not required to pass)
+pyright custom_components/
+
+# JS build (from card/ directory)
+cd card && npm run build
+```
+
+Dev dependencies: `pyright`, `ruff` (install via `uv sync`). JS build requires Node 22+ and `npm ci` in `card/`.
 
 ## Deployment to HA
 
