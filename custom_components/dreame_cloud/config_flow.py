@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -52,7 +53,7 @@ class DreameCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                     host=host,
                     port=port,
                 )
-                async with cloud:
+                async with cloud, asyncio.timeout(30):
                     await cloud.connect()
                     devices = await cloud.get_devices()
 
@@ -70,7 +71,7 @@ class DreameCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
             except AuthenticationError:
                 errors["base"] = "invalid_auth"
-            except DreameError:
+            except (DreameError, TimeoutError):
                 errors["base"] = "cannot_connect"
             except Exception:
                 _LOGGER.exception("Unexpected error during config flow")

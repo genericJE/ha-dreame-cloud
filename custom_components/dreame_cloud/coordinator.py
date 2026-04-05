@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -95,9 +96,12 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     async def _async_setup(self) -> None:
         """Set up the coordinator — connect and find the device."""
         try:
-            await self._cloud.connect()
-            self._device = await self._cloud.get_device()
+            async with asyncio.timeout(30):
+                await self._cloud.connect()
+                self._device = await self._cloud.get_device()
             self._connected = True
+        except TimeoutError as err:
+            raise UpdateFailed("Connection to Dreame cloud timed out") from err
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
         except DreameError as err:
@@ -173,9 +177,10 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
 
             if now - self._last_map_update >= map_interval:
                 try:
-                    self._map_data = await self.device.get_map()
+                    async with asyncio.timeout(15):
+                        self._map_data = await self.device.get_map()
                     self._last_map_update = now
-                except DreameError:
+                except (DreameError, TimeoutError):
                     _LOGGER.debug("Map update failed, using cached map")
 
             return DreameCloudData(
