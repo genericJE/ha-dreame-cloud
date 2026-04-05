@@ -106,8 +106,19 @@ class DreameVacuumMapCard extends HTMLElement {
   }
 
   set hass(hass) {
+    const prev = this._hass;
     this._hass = hass;
-    if (this._rendered) this._updateContent();
+    if (!this._rendered) return;
+    // Only re-render when a relevant entity changed
+    if (prev) {
+      let changed = false;
+      for (const eid of Object.values(this._entities)) {
+        const a = prev.states[eid], b = hass.states[eid];
+        if (a !== b) { changed = true; break; }
+      }
+      if (!changed) return;
+    }
+    this._updateContent();
   }
 
   _deriveEntities() {
@@ -766,9 +777,11 @@ class DreameVacuumMapCard extends HTMLElement {
   }
 
   _onPointerDown(e) {
+    // Cache bounding rect for the duration of the drag to avoid reflow on every pointermove
+    const svg = this.shadowRoot.querySelector(".map-overlay");
+    if (svg) this._cachedSvgRect = svg.getBoundingClientRect();
     const pt = this._getSvgCoords(e);
     if (!pt) return;
-    const svg = this.shadowRoot.querySelector(".map-overlay");
 
     if (this._mode === "zone") {
       this._drawing = true;
@@ -941,6 +954,7 @@ class DreameVacuumMapCard extends HTMLElement {
   }
 
   _onPointerUp(e) {
+    this._cachedSvgRect = null;
     // Handle goto tap (no drawing involved)
     if (this._mode === "goto" && this._pointerStart) {
       const pt = this._getSvgCoords(e);
@@ -1277,13 +1291,20 @@ class DreameVacuumMapCard extends HTMLElement {
 
   _zoneBBox(zone) {
     if (!zone.points || zone.points.length < 3) return null;
+    // Memoize: reuse cached result if points haven't changed
+    const fp = zone.points[0];
+    if (zone._bbox && zone._bboxKey === zone.points.length + fp.x + fp.y) {
+      return zone._bbox;
+    }
     const xs = zone.points.map((p) => p.x);
     const ys = zone.points.map((p) => p.y);
-    return {
+    zone._bbox = {
       x: Math.min(...xs), y: Math.min(...ys),
       w: Math.max(...xs) - Math.min(...xs),
       h: Math.max(...ys) - Math.min(...ys),
     };
+    zone._bboxKey = zone.points.length + fp.x + fp.y;
+    return zone._bbox;
   }
 
   _zoneHitTest(px, py) {
@@ -1445,7 +1466,7 @@ class DreameVacuumMapCard extends HTMLElement {
   _getSvgCoords(e) {
     const svg = this.shadowRoot.querySelector(".map-overlay");
     if (!svg) return null;
-    const rect = svg.getBoundingClientRect();
+    const rect = this._cachedSvgRect || svg.getBoundingClientRect();
     const svgWidth = parseFloat(svg.getAttribute("viewBox")?.split(" ")[2] || "800");
     const svgHeight = parseFloat(svg.getAttribute("viewBox")?.split(" ")[3] || "600");
     return {
