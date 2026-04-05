@@ -1,6 +1,6 @@
 [project]
 name = "ha-dreame-cloud"
-version = "0.1.0"
+version = "0.3.0"
 description = "Dreame Cloud Vacuum integration for Home Assistant"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -23,11 +23,42 @@ packages = ["custom_components/dreame_cloud"]
 [tool.uv]
 dev-dependencies = [
     "pyright>=1.1.400",
+    "ruff>=0.11",
 ]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["dev"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",   # trailing commas (conflicts with formatter)
+    "D",        # docstring rules (not enforced yet)
+    "ISC001",   # single-line implicit string concat (conflicts with formatter)
+    "FBT",      # boolean trap (too noisy for HA service methods)
+    "ANN401",   # disallow Any (unavoidable with HA/MIoT APIs)
+    "ARG",      # unused arguments (HA callback signatures require them)
+    "PLR0913",  # too many arguments (HA platform setup signatures)
+    "PLR2004",  # magic values (unavoidable in protocol constants)
+    "TRY003",   # long exception messages
+    "EM",       # exception message style
+    "TC",       # type-checking imports (breaks HA runtime imports)
+    "PLC0415",  # import outside top-level (HA conditional imports)
+    "C901",     # complexity (map rendering is inherently complex)
+    "BLE001",   # blind except (needed for resilient map parsing)
+    "PLR0911",  # too many return statements
+    "PLR0912",  # too many branches
+    "PLR0915",  # too many statements
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dreame_mocker"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.13"
 include = ["custom_components"]
+stubPath = "stubs"
 # HA base classes mix property/cached_property — unfixable from integration side
 reportIncompatibleVariableOverride = false

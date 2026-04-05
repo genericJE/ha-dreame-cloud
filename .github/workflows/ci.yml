@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+
+  typecheck:
+    runs-on: ubuntu-latest
+    # Strict mode has existing violations; non-blocking until they're resolved.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip install homeassistant Pillow numpy pyright
+          uv pip install "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git"
+      - run: .venv/bin/pyright --pythonpath .venv/bin/python custom_components
+
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check pyproject.toml and manifest.json versions match
+        run: |
+          PYPROJECT=$(python3 -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          MANIFEST=$(python3 -c "import json, pathlib; print(json.loads(pathlib.Path('custom_components/dreame_cloud/manifest.json').read_text())['version'])")
+          if [ "$PYPROJECT" != "$MANIFEST" ]; then
+            echo "::error::Version mismatch: pyproject.toml=$PYPROJECT manifest.json=$MANIFEST"
+            exit 1
+          fi
+          echo "Versions match: $PYPROJECT"
+
+  js-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check custom_components/dreame_cloud/www/dreame-vacuum-map-card.js
