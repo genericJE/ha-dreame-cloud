@@ -34,7 +34,7 @@ class DreameCloudData:
 
     status: DeviceStatus
     map_data: DreameMap | None = None
-    consumables: dict[str, int] = field(default_factory=lambda: dict[str, int]())
+    consumables: dict[str, int] = field(default_factory=dict)
     dnd_enabled: bool = False
     volume: int = 50
 

@@ -11,11 +11,10 @@ import zlib
 from typing import Any
 
 import numpy as np
-from PIL import Image, ImageDraw
-
 from homeassistant.components.camera import Camera
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from PIL import Image, ImageDraw
 
 from dreame_mocker.client import DreameMap, MapHeader
 
@@ -148,7 +147,7 @@ def _transform_pixel(
 
 
 def _compute_room_bboxes(
-    pixel_array: "np.ndarray[Any, np.dtype[np.uint8]]",
+    pixel_array: np.ndarray[Any, np.dtype[np.uint8]],
     w: int,
     h: int,
     flip_x: bool,

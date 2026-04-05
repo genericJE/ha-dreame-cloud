@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any
 
+import voluptuous as vol
 from homeassistant.components.vacuum import (
     StateVacuumEntity,
     VacuumEntityFeature,
@@ -14,15 +15,14 @@ from homeassistant.components.vacuum.const import VacuumActivity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-import voluptuous as vol
 
 from dreame_mocker.client import DreameError
 from dreame_mocker.const import DeviceState
 
 from . import DreameCloudConfigEntry
 from .const import (
-    FAN_SPEEDS,
     FAN_SPEED_TO_SUCTION,
+    FAN_SPEEDS,
     SUCTION_TO_FAN_SPEED,
 )
 from .coordinator import DreameCloudCoordinator
