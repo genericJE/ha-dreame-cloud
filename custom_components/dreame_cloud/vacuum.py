@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.components.vacuum import (
+from homeassistant.components.vacuum import (  # pyright: ignore[reportAttributeAccessIssue]
     StateVacuumEntity,
     VacuumEntityFeature,
 )

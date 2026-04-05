@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -34,7 +35,7 @@ class DreameCloudData:
 
     status: DeviceStatus
     map_data: DreameMap | None = None
-    consumables: dict[str, int] = field(default_factory=dict)
+    consumables: dict[str, int] = field(default_factory=lambda: {})  # noqa: PIE807
     dnd_enabled: bool = False
     volume: int = 50
 
@@ -69,7 +70,15 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         self._map_data: DreameMap | None = None
         self._last_map_update: float = 0
         self._connected = False
-        self._pending_zone_update: dict | None = None
+        self._pending_zone_update: dict[str, Any] | None = None
+
+    @property
+    def config_entry(self) -> ConfigEntry[DreameCloudData]:
+        """Return the config entry (guaranteed non-None for this coordinator)."""
+        entry = super().config_entry
+        if entry is None:
+            raise RuntimeError("Config entry not set")
+        return entry
 
     @property
     def device(self) -> DreameDevice:
@@ -198,11 +207,11 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             raise UpdateFailed(f"Update failed: {err}") from err
 
     @property
-    def pending_zone_update(self) -> dict | None:
+    def pending_zone_update(self) -> dict[str, Any] | None:
         """Return the pending zone update overlay (used by camera rendering)."""
         return self._pending_zone_update
 
-    def set_pending_zone_update(self, update: dict | None) -> None:
+    def set_pending_zone_update(self, update: dict[str, Any] | None) -> None:
         """Cache zone data sent to the vacuum for immediate rendering.
 
         The cloud's saved map blob (rism) updates lazily, so the camera
