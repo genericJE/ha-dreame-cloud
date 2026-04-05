@@ -41,11 +41,17 @@ jobs:
           fi
           echo "Versions match: $PYPROJECT"
 
-  js-syntax:
+  js-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: npm ci
+        working-directory: card
+      - run: npm run build
+        working-directory: card
       - run: node --check custom_components/dreame_cloud/www/dreame-vacuum-map-card.js
+      - name: Verify bundle is up to date
+        run: git diff --exit-code custom_components/dreame_cloud/www/dreame-vacuum-map-card.js
