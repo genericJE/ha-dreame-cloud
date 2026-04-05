@@ -16,6 +16,7 @@ from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import voluptuous as vol
 
+from dreame_mocker.client import DreameError
 from dreame_mocker.const import DeviceState
 
 from . import DreameCloudConfigEntry
@@ -278,9 +279,13 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         ]
         value = json.dumps({"selects": selects})
 
-        await self.coordinator.device.send_action(
-            4, 1, params=[{"piid": 1, "value": value}]
-        )
+        try:
+            await self.coordinator.device.send_action(
+                4, 1, params=[{"piid": 1, "value": value}]
+            )
+        except DreameError:
+            _LOGGER.exception("Failed to start segment cleaning")
+            return
         await self.coordinator.async_request_refresh()
 
     async def async_update_map(
@@ -328,9 +333,13 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             return
 
         value = json.dumps(update)
-        await self.coordinator.device.send_action(
-            6, 2, params=[{"piid": 4, "value": value}]
-        )
+        try:
+            await self.coordinator.device.send_action(
+                6, 2, params=[{"piid": 4, "value": value}]
+            )
+        except DreameError:
+            _LOGGER.exception("Failed to update map")
+            return
         # Cache the sent zone data so camera.py uses it instead of
         # stale rism data until the cloud updates the saved map blob.
         self.coordinator.set_pending_zone_update(update)
@@ -358,9 +367,13 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             ],
         })
 
-        await self.coordinator.device.send_action(
-            4, 1, params=[{"piid": 1, "value": value}]
-        )
+        try:
+            await self.coordinator.device.send_action(
+                4, 1, params=[{"piid": 1, "value": value}]
+            )
+        except DreameError:
+            _LOGGER.exception("Failed to start zone cleaning")
+            return
         await self.coordinator.async_request_refresh()
 
     async def async_goto(
@@ -379,12 +392,16 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         suction = status.suction_level if status else 1
         water = status.water_volume if status else 2
         value = json.dumps({"points": [[x, y, 1, suction, water]]})
-        await self.coordinator.device.send_action(
-            4, 1, params=[
-                {"piid": 1, "value": 20},
-                {"piid": 10, "value": value},
-            ],
-        )
+        try:
+            await self.coordinator.device.send_action(
+                4, 1, params=[
+                    {"piid": 1, "value": 20},
+                    {"piid": 10, "value": value},
+                ],
+            )
+        except DreameError:
+            _LOGGER.exception("Failed to send goto command")
+            return
         await self.coordinator.async_request_refresh()
 
     async def async_request_map(
