@@ -1183,6 +1183,21 @@
       this._drawingRect = null;
       this._pointerStart = null;
       this._gotoPin = null;
+      this._abortController = null;
+      this._timeoutIds = /* @__PURE__ */ new Set();
+    }
+    disconnectedCallback() {
+      this._abortController?.abort();
+      for (const id of this._timeoutIds) clearTimeout(id);
+      this._timeoutIds.clear();
+    }
+    _setTimeout(fn, ms) {
+      const id = setTimeout(() => {
+        this._timeoutIds.delete(id);
+        fn();
+      }, ms);
+      this._timeoutIds.add(id);
+      return id;
     }
     static getConfigElement() {
       return document.createElement("dreame-vacuum-map-card-editor");
@@ -1319,10 +1334,13 @@
           this._updateContent();
         });
       });
+      this._abortController?.abort();
+      this._abortController = new AbortController();
+      const signal = this._abortController.signal;
       const mapContainer = card.querySelector(".map-container");
-      mapContainer.addEventListener("pointerdown", (e) => this._onPointerDown(e));
-      mapContainer.addEventListener("pointermove", (e) => this._onPointerMove(e));
-      mapContainer.addEventListener("pointerup", (e) => this._onPointerUp(e));
+      mapContainer.addEventListener("pointerdown", (e) => this._onPointerDown(e), { signal });
+      mapContainer.addEventListener("pointermove", (e) => this._onPointerMove(e), { signal });
+      mapContainer.addEventListener("pointerup", (e) => this._onPointerUp(e), { signal });
       this._updateContent();
     }
     _updateContent() {
@@ -2840,7 +2858,7 @@
         this._checkSaveResult(sentCounts);
         return;
       }
-      setTimeout(() => {
+      this._setTimeout(() => {
         this._pollForSaveResult(sentCounts, preSaveTs, attempt + 1);
       }, 2e3);
     }
@@ -2873,9 +2891,9 @@
       toast.textContent = message;
       toast.style.display = "block";
       toast.style.opacity = "1";
-      setTimeout(() => {
+      this._setTimeout(() => {
         toast.style.opacity = "0";
-        setTimeout(() => {
+        this._setTimeout(() => {
           toast.style.display = "none";
         }, 500);
       }, 5e3);
