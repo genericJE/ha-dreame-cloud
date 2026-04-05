@@ -23,7 +23,6 @@ from . import DreameCloudConfigEntry
 from .const import (
     COLOR_BACKGROUND,
     COLOR_CHARGER,
-    COLOR_ROBOT,
     COLOR_WALL,
     CONF_MAP_FLIP_X,
     CONF_MAP_FLIP_Y,
@@ -748,13 +747,20 @@ def _render_map(
         r = max(3, min(w_out, h_out) // 60)
         draw.rectangle([cx - r, cy - r, cx + r, cy + r], fill=COLOR_CHARGER)
 
-    # Draw robot
+    # Robot position (for frontend overlay, not drawn on PNG)
     rx, ry = _vacuum_to_image(
         header.robot_x, header.robot_y, header, w, h, flip_x, flip_y, rotation, 1
     )
-    if 0 <= rx < w_out and 0 <= ry < h_out:
-        r = max(3, min(w_out, h_out) // 50)
-        draw.ellipse([rx - r, ry - r, rx + r, ry + r], fill=COLOR_ROBOT)
+
+    # Transform robot angle through the same flip/rotation pipeline.
+    # Vacuum angle: 0 = east, CCW positive (standard math convention).
+    robot_angle = header.robot_angle
+    if flip_x:
+        robot_angle = 180 - robot_angle
+    if flip_y:
+        robot_angle = -robot_angle
+    robot_angle += rotation
+    robot_angle %= 360
 
     # Scale up for better visibility
     if scale > 1:
@@ -781,7 +787,7 @@ def _render_map(
         "raw_width": w,
         "raw_height": h,
         "robot_position": (
-            {"x": rx * scale, "y": ry * scale}
+            {"x": rx * scale, "y": ry * scale, "angle": robot_angle}
             if 0 <= rx < w_out and 0 <= ry < h_out
             else None
         ),

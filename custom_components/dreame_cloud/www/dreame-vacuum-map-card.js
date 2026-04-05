@@ -676,9 +676,12 @@ class DreameVacuumMapCard extends HTMLElement {
     const robotPos = camera.attributes.robot_position;
     if (robotPos) {
       const rx = robotPos.x, ry = robotPos.y;
-      const R = 22;
+      const R = 16;
+      // Vacuum angle: 0=east, CCW+. SVG robot faces up (90° in math).
+      // SVG rotate is CW, so: svgAngle = 90 - angle.
+      const svgAngle = robotPos.angle != null ? 90 - robotPos.angle : 0;
       svgContent += `
-        <g transform="translate(${rx}, ${ry})" filter="url(#robotShadow)">
+        <g transform="translate(${rx}, ${ry}) rotate(${svgAngle})" filter="url(#robotShadow)">
           <!-- Body -->
           <circle cx="0" cy="0" r="${R}" fill="url(#robotBody)" />
           <!-- Edge ring -->
