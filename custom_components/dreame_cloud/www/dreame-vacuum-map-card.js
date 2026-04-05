@@ -32,6 +32,132 @@ function batteryIcon(level) {
   return "mdi:battery-alert";
 }
 
+// ── Constants ───────────────────────────────────────────────────────
+
+// Cleaning parameter maps (name -> numeric value for service calls)
+const SUCTION_MAP = { Quiet: 0, Standard: 1, Strong: 2, Turbo: 3 };
+const WATER_MAP = { Low: 1, Medium: 2, High: 3 };
+const CLEANING_MODE_MAP = { Sweeping: 0, Mopping: 1, "Sweep & Mop": 2 };
+
+// Cleaning parameter option lists (for settings UI)
+const SUCTION_OPTIONS = ["Quiet", "Standard", "Strong", "Turbo"];
+const WATER_OPTIONS = ["Low", "Medium", "High"];
+const CLEANING_MODE_OPTIONS = ["Sweeping", "Mopping", "Sweep & Mop"];
+
+// Drawing preview colors per tool
+const RECT_TOOL_COLORS = {
+  no_go: "#f44336", carpet: "#9c27b0", low_clearance: "#2196f3", ramp: "#ff9800",
+};
+const LINE_TOOL_COLORS = {
+  wall: "#f44336", threshold: "#4caf50", impassable: "#ff5722", cliff: "#795548",
+};
+
+// Tool categories
+const RECT_TOOLS = ["no_go", "carpet", "low_clearance", "ramp"];
+const LINE_TOOLS = ["wall", "threshold", "impassable", "cliff"];
+
+// Furniture types with default vacuum-coord dimensions (mm)
+const FURNITURE_TYPES = {
+  1: { name: "Single Bed", w: 2000, h: 1000 },
+  2: { name: "Double Bed", w: 2000, h: 1600 },
+  3: { name: "Armchair", w: 800, h: 800 },
+  4: { name: "Two Seat Sofa", w: 1400, h: 800 },
+  5: { name: "Three Seat Sofa", w: 2000, h: 800 },
+  6: { name: "Dining Table", w: 1200, h: 800 },
+  7: { name: "Nightstand", w: 500, h: 500 },
+  8: { name: "Coffee Table", w: 1000, h: 500 },
+  9: { name: "Toilet", w: 400, h: 600 },
+  10: { name: "Litter Box", w: 500, h: 400 },
+  11: { name: "Pet Bed", w: 600, h: 500 },
+  12: { name: "Food Bowl", w: 300, h: 300 },
+  13: { name: "Pet Toilet", w: 500, h: 400 },
+  14: { name: "Refrigerator", w: 600, h: 700 },
+  15: { name: "Washing Machine", w: 600, h: 600 },
+  16: { name: "Enclosed Litter Box", w: 500, h: 500 },
+  17: { name: "Air Conditioner", w: 800, h: 300 },
+  18: { name: "TV Cabinet", w: 1600, h: 400 },
+  19: { name: "Bookshelf", w: 800, h: 400 },
+  20: { name: "Shoe Cabinet", w: 800, h: 400 },
+  21: { name: "Wardrobe", w: 1600, h: 600 },
+  22: { name: "Greenery", w: 400, h: 400 },
+  23: { name: "Floor Mirror", w: 400, h: 300 },
+  24: { name: "L-Shaped Sofa", w: 2400, h: 1600 },
+  25: { name: "Round Coffee Table", w: 600, h: 600 },
+  26: { name: "Table", w: 1000, h: 800 },
+};
+
+// Edit toolbar tool definitions
+const EDIT_TOOLS = [
+  { id: "no_go", icon: "mdi:cancel", label: "No-Go" },
+  { id: "wall", icon: "mdi:wall", label: "Wall" },
+  { id: "carpet", icon: "mdi:rug", label: "Carpet" },
+  { id: "low_clearance", icon: "mdi:human-male-height", label: "Low Clear." },
+  { id: "threshold", icon: "mdi:door-open", label: "Passable" },
+  { id: "impassable", icon: "mdi:door-closed-lock", label: "Impass." },
+  { id: "ramp", icon: "mdi:slope-uphill", label: "Ramp" },
+  { id: "cliff", icon: "mdi:stairs", label: "Cliff" },
+  { id: "furniture", icon: "mdi:sofa", label: "Furniture" },
+];
+
+// Edit tool hint text
+const EDIT_TOOL_HINTS = {
+  no_go: "Draw to add. Tap to select, drag to move, handles to resize.",
+  wall: "Draw a line for a virtual wall. Tap an existing wall to delete.",
+  carpet: "Draw to add. Tap to select, drag to move, handles to resize.",
+  low_clearance: "Draw to add. Tap to select, drag to move, handles to resize.",
+  threshold: "Draw a line for a passable threshold. Tap to delete.",
+  impassable: "Draw a line for an impassable threshold. Tap to delete.",
+  ramp: "Draw to add. Tap to select, drag to move, handles to resize.",
+  cliff: "Draw a line for a cliff edge. Tap to delete.",
+  furniture: "Tap to select. Drag to move, handles to resize. Tap empty space to add.",
+};
+
+// Status display labels
+const STATUS_LABELS = {
+  cleaning: "Cleaning",
+  docked: "Docked",
+  idle: "Idle",
+  paused: "Paused",
+  returning: "Returning",
+  error: "Error",
+  unavailable: "Unavailable",
+};
+
+// Vacuum service action mapping
+const VACUUM_SERVICE_MAP = {
+  start: ["vacuum", "start"],
+  pause: ["vacuum", "pause"],
+  stop: ["vacuum", "stop"],
+  return_to_base: ["vacuum", "return_to_base"],
+};
+
+// Dock menu actions
+const DOCK_ACTIONS = [
+  { key: "mop_wash", label: "Wash Mop", icon: "mdi:water" },
+  { key: "mop_dry", label: "Dry Mop", icon: "mdi:fan" },
+  { key: "dust_collection", label: "Empty Bin", icon: "mdi:delete-variant" },
+];
+
+// Settings panel consumable definitions
+const CONSUMABLE_DEFS = [
+  { key: "main_brush", label: "Main Brush", icon: "mdi:brush" },
+  { key: "side_brush", label: "Side Brush", icon: "mdi:brush" },
+  { key: "filter", label: "Filter", icon: "mdi:air-filter" },
+  { key: "mop_pad", label: "Mop Pad", icon: "mdi:square-rounded" },
+];
+
+// Save-result attribute mapping (zone type key -> entity attribute name)
+const SAVE_RESULT_ATTR_MAP = {
+  passable: "passable_thresholds",
+  impassable: "impassable_thresholds",
+  ramp: "ramps",
+  cliff: "cliffs",
+  no_go: "no_go_zones",
+  wall: "virtual_walls",
+  low_clearance: "low_clearance_zones",
+  furniture: "furniture",
+};
+
 // ── Card Definition ──────────────────────────────────────────────────
 class DreameVacuumMapCard extends HTMLElement {
   constructor() {
@@ -355,16 +481,7 @@ class DreameVacuumMapCard extends HTMLElement {
   }
 
   _formatStatus(activity) {
-    const map = {
-      cleaning: "Cleaning",
-      docked: "Docked",
-      idle: "Idle",
-      paused: "Paused",
-      returning: "Returning",
-      error: "Error",
-      unavailable: "Unavailable",
-    };
-    return map[activity] || activity;
+    return STATUS_LABELS[activity] || activity;
   }
 
   _updateMap(card) {
@@ -499,10 +616,7 @@ class DreameVacuumMapCard extends HTMLElement {
       const d = this._drawingRect;
       const x = Math.min(d.x1, d.x2), y = Math.min(d.y1, d.y2);
       const w = Math.abs(d.x2 - d.x1), h = Math.abs(d.y2 - d.y1);
-      const toolColors = {
-        no_go: "#f44336", carpet: "#9c27b0", low_clearance: "#2196f3", ramp: "#ff9800",
-      };
-      const color = toolColors[this._editTool] || "#f44336";
+      const color = RECT_TOOL_COLORS[this._editTool] || "#f44336";
       svgContent += `
         <rect x="${x}" y="${y}" width="${w}" height="${h}"
           fill="${color}26" stroke="${color}" stroke-width="2"
@@ -597,10 +711,7 @@ class DreameVacuumMapCard extends HTMLElement {
     // Drawing preview for line tools (wall, threshold, impassable, cliff)
     if (this._mode === "edit" && this._drawingWall) {
       const d = this._drawingWall;
-      const lineColors = {
-        wall: "#f44336", threshold: "#4caf50", impassable: "#ff5722", cliff: "#795548",
-      };
-      const lineColor = lineColors[this._editTool] || "#f44336";
+      const lineColor = LINE_TOOL_COLORS[this._editTool] || "#f44336";
       svgContent += `
         <line x1="${d.x1}" y1="${d.y1}" x2="${d.x2}" y2="${d.y2}"
           stroke="${lineColor}" stroke-width="3" stroke-dasharray="4 2"
@@ -837,8 +948,7 @@ class DreameVacuumMapCard extends HTMLElement {
         return;
       }
 
-      const lineTools = ["wall", "threshold", "impassable", "cliff"];
-      if (lineTools.includes(this._editTool)) {
+      if (LINE_TOOLS.includes(this._editTool)) {
         this._drawing = true;
         this._drawingWall = { x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
       } else {
@@ -1050,8 +1160,7 @@ class DreameVacuumMapCard extends HTMLElement {
       const start = this._pointerStart;
       const tapDist = start && pt ? Math.hypot(pt.x - start.x, pt.y - start.y) : Infinity;
       const isTap = tapDist < 8;
-      const rectTools = ["no_go", "carpet", "low_clearance", "ramp"];
-      const isRectTool = rectTools.includes(this._editTool);
+      const isRectTool = RECT_TOOLS.includes(this._editTool);
 
       // Zone drag end (move/resize) for rect tools
       if (isRectTool && this._zoneDragAction && this._zoneDragStart) {
@@ -1198,39 +1307,8 @@ class DreameVacuumMapCard extends HTMLElement {
 
   // ── Furniture editing ──────────────────────────────────────────────
 
-  static get FURNITURE_TYPES() {
-    return {
-      1: { name: "Single Bed", w: 2000, h: 1000 },
-      2: { name: "Double Bed", w: 2000, h: 1600 },
-      3: { name: "Armchair", w: 800, h: 800 },
-      4: { name: "Two Seat Sofa", w: 1400, h: 800 },
-      5: { name: "Three Seat Sofa", w: 2000, h: 800 },
-      6: { name: "Dining Table", w: 1200, h: 800 },
-      7: { name: "Nightstand", w: 500, h: 500 },
-      8: { name: "Coffee Table", w: 1000, h: 500 },
-      9: { name: "Toilet", w: 400, h: 600 },
-      10: { name: "Litter Box", w: 500, h: 400 },
-      11: { name: "Pet Bed", w: 600, h: 500 },
-      12: { name: "Food Bowl", w: 300, h: 300 },
-      13: { name: "Pet Toilet", w: 500, h: 400 },
-      14: { name: "Refrigerator", w: 600, h: 700 },
-      15: { name: "Washing Machine", w: 600, h: 600 },
-      16: { name: "Enclosed Litter Box", w: 500, h: 500 },
-      17: { name: "Air Conditioner", w: 800, h: 300 },
-      18: { name: "TV Cabinet", w: 1600, h: 400 },
-      19: { name: "Bookshelf", w: 800, h: 400 },
-      20: { name: "Shoe Cabinet", w: 800, h: 400 },
-      21: { name: "Wardrobe", w: 1600, h: 600 },
-      22: { name: "Greenery", w: 400, h: 400 },
-      23: { name: "Floor Mirror", w: 400, h: 300 },
-      24: { name: "L-Shaped Sofa", w: 2400, h: 1600 },
-      25: { name: "Round Coffee Table", w: 600, h: 600 },
-      26: { name: "Table", w: 1000, h: 800 },
-    };
-  }
-
   _renderFurniturePicker() {
-    const types = DreameVacuumMapCard.FURNITURE_TYPES;
+    const types = FURNITURE_TYPES;
     const buttons = Object.entries(types).map(([id, info]) =>
       `<button class="furniture-type-btn" data-type="${id}">${info.name}</button>`
     ).join("");
@@ -1283,7 +1361,7 @@ class DreameVacuumMapCard extends HTMLElement {
   }
 
   _addFurniture(typeId) {
-    const typeInfo = DreameVacuumMapCard.FURNITURE_TYPES[typeId];
+    const typeInfo = FURNITURE_TYPES[typeId];
     if (!typeInfo || !this._furniturePlacePoint) return;
     const pt = this._furniturePlacePoint;
 
@@ -1557,28 +1635,6 @@ class DreameVacuumMapCard extends HTMLElement {
     const container = card.querySelector(".room-list-container");
 
     if (this._mode === "edit") {
-      const tools = [
-        { id: "no_go", icon: "mdi:cancel", label: "No-Go" },
-        { id: "wall", icon: "mdi:wall", label: "Wall" },
-        { id: "carpet", icon: "mdi:rug", label: "Carpet" },
-        { id: "low_clearance", icon: "mdi:human-male-height", label: "Low Clear." },
-        { id: "threshold", icon: "mdi:door-open", label: "Passable" },
-        { id: "impassable", icon: "mdi:door-closed-lock", label: "Impass." },
-        { id: "ramp", icon: "mdi:slope-uphill", label: "Ramp" },
-        { id: "cliff", icon: "mdi:stairs", label: "Cliff" },
-        { id: "furniture", icon: "mdi:sofa", label: "Furniture" },
-      ];
-      const hints = {
-        no_go: "Draw to add. Tap to select, drag to move, handles to resize.",
-        wall: "Draw a line for a virtual wall. Tap an existing wall to delete.",
-        carpet: "Draw to add. Tap to select, drag to move, handles to resize.",
-        low_clearance: "Draw to add. Tap to select, drag to move, handles to resize.",
-        threshold: "Draw a line for a passable threshold. Tap to delete.",
-        impassable: "Draw a line for an impassable threshold. Tap to delete.",
-        ramp: "Draw to add. Tap to select, drag to move, handles to resize.",
-        cliff: "Draw a line for a cliff edge. Tap to delete.",
-        furniture: "Tap to select. Drag to move, handles to resize. Tap empty space to add.",
-      };
       const counts = [
         [this._editNoGoZones.length, "no-go"],
         [this._editVirtualWalls.length, "wall"],
@@ -1592,8 +1648,7 @@ class DreameVacuumMapCard extends HTMLElement {
       ].filter(([c]) => c > 0).map(([c, l]) => `${c} ${l}`).join(" · ");
 
       // Sub-toolbar: delete button for selected furniture or zone
-      const rectTools = ["no_go", "carpet", "low_clearance", "ramp"];
-      const showZoneDelete = rectTools.includes(this._editTool) && this._selectedZoneIdx >= 0;
+      const showZoneDelete = RECT_TOOLS.includes(this._editTool) && this._selectedZoneIdx >= 0;
       const showFurnitureDelete = this._editTool === "furniture" && this._selectedFurnitureIdx >= 0;
       const furnitureActions = (this._editTool === "furniture" || showZoneDelete) ? `
         <div class="furniture-actions">
@@ -1613,13 +1668,13 @@ class DreameVacuumMapCard extends HTMLElement {
       container.innerHTML = `
         <div class="edit-toolbar">
           <div class="edit-tool-selector">
-            ${tools.map((t) => `
+            ${EDIT_TOOLS.map((t) => `
               <button class="edit-tool-btn ${this._editTool === t.id ? "active" : ""}" data-tool="${t.id}">
                 <ha-icon icon="${t.icon}"></ha-icon> ${t.label}
               </button>
             `).join("")}
           </div>
-          <div class="edit-hint">${hints[this._editTool]}</div>
+          <div class="edit-hint">${EDIT_TOOL_HINTS[this._editTool]}</div>
           ${furnitureActions}
           ${this._furniturePickerOpen ? this._renderFurniturePicker() : ""}
           ${counts ? `<div class="edit-counts">${counts}</div>` : ""}
@@ -1848,14 +1903,9 @@ class DreameVacuumMapCard extends HTMLElement {
       `;
     }
 
-    const dockActions = [
-      { key: "mop_wash", label: "Wash Mop", icon: "mdi:water" },
-      { key: "mop_dry", label: "Dry Mop", icon: "mdi:fan" },
-      { key: "dust_collection", label: "Empty Bin", icon: "mdi:delete-variant" },
-    ];
     const dockMenuHtml = this._dockMenuOpen ? `
       <div class="dock-menu">
-        ${dockActions.map((a) => `
+        ${DOCK_ACTIONS.map((a) => `
           <button class="dock-action-btn" data-entity="${this._entities[a.key]}">
             <ha-icon icon="${a.icon}"></ha-icon>
             <span>${a.label}</span>
@@ -1911,13 +1961,9 @@ class DreameVacuumMapCard extends HTMLElement {
     if (action === "clean") {
       if (this._mode === "room" && this._selectedRooms.size > 0) {
         // Clean selected rooms
-        const suctionMap = { Quiet: 0, Standard: 1, Strong: 2, Turbo: 3 };
-        const waterMap = { Low: 1, Medium: 2, High: 3 };
-        const modeMap = { Sweeping: 0, Mopping: 1, "Sweep & Mop": 2 };
-
-        const suction = suctionMap[this._getState(this._entities.suction_level)?.state] ?? 1;
-        const water = waterMap[this._getState(this._entities.water_volume)?.state] ?? 2;
-        const mode = modeMap[this._getState(this._entities.cleaning_mode)?.state] ?? 2;
+        const suction = SUCTION_MAP[this._getState(this._entities.suction_level)?.state] ?? 1;
+        const water = WATER_MAP[this._getState(this._entities.water_volume)?.state] ?? 2;
+        const mode = CLEANING_MODE_MAP[this._getState(this._entities.cleaning_mode)?.state] ?? 2;
 
         this._hass.callService("dreame_cloud", "clean_segment", {
           entity_id: this._entities.vacuum,
@@ -1932,13 +1978,9 @@ class DreameVacuumMapCard extends HTMLElement {
         const [x1, y1] = this._imageToVacuumCoords(Math.min(z.x1, z.x2), Math.min(z.y1, z.y2));
         const [x2, y2] = this._imageToVacuumCoords(Math.max(z.x1, z.x2), Math.max(z.y1, z.y2));
 
-        const suctionMap = { Quiet: 0, Standard: 1, Strong: 2, Turbo: 3 };
-        const waterMap = { Low: 1, Medium: 2, High: 3 };
-        const modeMap = { Sweeping: 0, Mopping: 1, "Sweep & Mop": 2 };
-
-        const suction = suctionMap[this._getState(this._entities.suction_level)?.state] ?? 1;
-        const water = waterMap[this._getState(this._entities.water_volume)?.state] ?? 2;
-        const mode = modeMap[this._getState(this._entities.cleaning_mode)?.state] ?? 2;
+        const suction = SUCTION_MAP[this._getState(this._entities.suction_level)?.state] ?? 1;
+        const water = WATER_MAP[this._getState(this._entities.water_volume)?.state] ?? 2;
+        const mode = CLEANING_MODE_MAP[this._getState(this._entities.cleaning_mode)?.state] ?? 2;
 
         this._hass.callService("dreame_cloud", "clean_zone", {
           entity_id: this._entities.vacuum,
@@ -1956,14 +1998,7 @@ class DreameVacuumMapCard extends HTMLElement {
       return;
     }
 
-    const serviceMap = {
-      start: ["vacuum", "start"],
-      pause: ["vacuum", "pause"],
-      stop: ["vacuum", "stop"],
-      return_to_base: ["vacuum", "return_to_base"],
-    };
-
-    const [domain, service] = serviceMap[action] || [];
+    const [domain, service] = VACUUM_SERVICE_MAP[action] || [];
     if (domain && service) {
       this._hass.callService(domain, service, {
         entity_id: this._entities.vacuum,
@@ -2055,20 +2090,10 @@ class DreameVacuumMapCard extends HTMLElement {
     const camera = this._hass.states[this._entities.map];
     if (!camera) return;
     const a = camera.attributes;
-    const attrMap = {
-      passable: "passable_thresholds",
-      impassable: "impassable_thresholds",
-      ramp: "ramps",
-      cliff: "cliffs",
-      no_go: "no_go_zones",
-      wall: "virtual_walls",
-      low_clearance: "low_clearance_zones",
-      furniture: "furniture",
-    };
     const rejected = [];
     for (const [key, sent] of Object.entries(sentCounts)) {
       if (!sent) continue;
-      const got = (a[attrMap[key]] || []).length;
+      const got = (a[SAVE_RESULT_ATTR_MAP[key]] || []).length;
       if (got < sent) {
         rejected.push(`${sent - got} ${key}`);
       }
@@ -2107,14 +2132,7 @@ class DreameVacuumMapCard extends HTMLElement {
     panel.classList.add("open");
 
     // Consumables
-    const consumables = [
-      { key: "main_brush", label: "Main Brush", icon: "mdi:brush" },
-      { key: "side_brush", label: "Side Brush", icon: "mdi:brush" },
-      { key: "filter", label: "Filter", icon: "mdi:air-filter" },
-      { key: "mop_pad", label: "Mop Pad", icon: "mdi:square-rounded" },
-    ];
-
-    const availableConsumables = consumables.filter((c) => this._getState(this._entities[c.key]));
+    const availableConsumables = CONSUMABLE_DEFS.filter((c) => this._getState(this._entities[c.key]));
     const consumableHtml = availableConsumables
       .map((c) => {
         const entity = this._getState(this._entities[c.key]);
@@ -2150,9 +2168,6 @@ class DreameVacuumMapCard extends HTMLElement {
     const waterVolumeEntity = this._getState(this._entities.water_volume);
     const currentMode = cleaningModeEntity?.state || "Sweep & Mop";
     const currentWater = waterVolumeEntity?.state || "Medium";
-    const suctionOptions = ["Quiet", "Standard", "Strong", "Turbo"];
-    const modeOptions = ["Sweeping", "Mopping", "Sweep & Mop"];
-    const waterOptions = ["Low", "Medium", "High"];
 
     // Room aliases & visibility
     const camera = this._getState(this._entities.map);
@@ -2217,19 +2232,19 @@ class DreameVacuumMapCard extends HTMLElement {
           <div class="config-group">
             <span class="config-label">Suction</span>
             <div class="segmented-control" data-type="suction">
-              ${suctionOptions.map((o) => `<button class="seg-btn ${o === suctionLevel ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
+              ${SUCTION_OPTIONS.map((o) => `<button class="seg-btn ${o === suctionLevel ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
             </div>
           </div>
           <div class="config-group">
             <span class="config-label">Water</span>
             <div class="segmented-control" data-type="water">
-              ${waterOptions.map((o) => `<button class="seg-btn ${o === currentWater ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
+              ${WATER_OPTIONS.map((o) => `<button class="seg-btn ${o === currentWater ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
             </div>
           </div>
           <div class="config-group">
             <span class="config-label">Mode</span>
             <div class="segmented-control" data-type="mode">
-              ${modeOptions.map((o) => `<button class="seg-btn ${o === currentMode ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
+              ${CLEANING_MODE_OPTIONS.map((o) => `<button class="seg-btn ${o === currentMode ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
             </div>
           </div>
         </div>
