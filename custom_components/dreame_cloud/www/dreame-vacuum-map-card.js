@@ -44,6 +44,7 @@ class DreameVacuumMapCard extends HTMLElement {
     this._mode = DreameVacuumMapCard._persistedMode || "all"; // all | room | zone | edit | goto
     this._roomView = "map"; // map | list
     this._settingsOpen = false;
+    this._dockMenuOpen = false;
     this._zone = null; // {x1, y1, x2, y2} in image px during drawing
     this._zoneFinalized = null; // finalized zone
     this._drawing = false;
@@ -93,8 +94,10 @@ class DreameVacuumMapCard extends HTMLElement {
       || config.entity !== this._config?.entity
       || config.map_entity !== this._config?.map_entity;
     this._config = { ...config };
-    if (!this._config.room_aliases) this._config.room_aliases = {};
-    if (!this._config.hidden_rooms) this._config.hidden_rooms = [];
+    // Merge localStorage overrides for room aliases and hidden rooms
+    const stored = this._loadRoomSettings();
+    this._config.room_aliases = { ...(config.room_aliases || {}), ...(stored.room_aliases || {}) };
+    this._config.hidden_rooms = stored.hidden_rooms || config.hidden_rooms || [];
     this._deriveEntities();
     if (needsRender) {
       this._render();
@@ -141,6 +144,29 @@ class DreameVacuumMapCard extends HTMLElement {
     return room?.name || `Room ${segId}`;
   }
 
+  _roomSettingsKey() {
+    return `dreame-map-rooms-${this._config.entity || "default"}`;
+  }
+
+  _loadRoomSettings() {
+    try {
+      const raw = localStorage.getItem(this._roomSettingsKey());
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  _saveRoomSettings() {
+    const data = {
+      room_aliases: this._config.room_aliases || {},
+      hidden_rooms: this._config.hidden_rooms || [],
+    };
+    localStorage.setItem(this._roomSettingsKey(), JSON.stringify(data));
+  }
+
+  _fireConfigChanged() {
+    this._saveRoomSettings();
+  }
+
   _getState(entityId) {
     if (!this._hass || !this._hass.states[entityId]) return null;
     return this._hass.states[entityId];
@@ -178,8 +204,6 @@ class DreameVacuumMapCard extends HTMLElement {
           <button class="tab" data-mode="all">All</button>
           <button class="tab" data-mode="room">Room</button>
           <button class="tab" data-mode="zone">Zone</button>
-          <button class="tab" data-mode="goto">Go To</button>
-          <button class="tab" data-mode="edit">Edit</button>
         </div>
         <div class="room-list-container"></div>
         <div class="config-section"></div>
@@ -281,6 +305,12 @@ class DreameVacuumMapCard extends HTMLElement {
             <ha-icon icon="${battIcon}"></ha-icon>
             <span>${battery}%</span>
           </div>
+          <button class="header-icon-btn ${this._mode === "goto" ? "active" : ""}" data-mode="goto" title="Go To">
+            <ha-icon icon="mdi:map-marker"></ha-icon>
+          </button>
+          <button class="header-icon-btn ${this._mode === "edit" ? "active" : ""}" data-mode="edit" title="Edit Map">
+            <ha-icon icon="mdi:pencil"></ha-icon>
+          </button>
           <button class="settings-btn" title="Settings">
             <ha-icon icon="mdi:cog"></ha-icon>
           </button>
@@ -297,6 +327,31 @@ class DreameVacuumMapCard extends HTMLElement {
         this._updateSettingsPanel(card);
       });
     }
+
+    header.querySelectorAll(".header-icon-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const newMode = btn.dataset.mode;
+        if (this._mode === newMode) {
+          this._mode = "all";
+          DreameVacuumMapCard._persistedMode = "all";
+          if (newMode === "edit") this._exitEditMode();
+        } else {
+          this._mode = newMode;
+          DreameVacuumMapCard._persistedMode = newMode;
+          if (newMode === "edit") {
+            this._enterEditMode();
+          } else {
+            this._exitEditMode();
+          }
+        }
+        this._selectedRooms.clear();
+        this._roomOrder = [];
+        this._zoneFinalized = null;
+        this._zone = null;
+        this._gotoPin = null;
+        this._updateContent();
+      });
+    });
   }
 
   _formatStatus(activity) {
@@ -357,13 +412,17 @@ class DreameVacuumMapCard extends HTMLElement {
         const strokeColor = selected ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},0.4)`;
 
         const orderIdx = this._roomOrder.indexOf(parseInt(segId, 10));
+        const badgeY = room.center_y - (Math.min(room.w, room.h) > 80 ? 24 : 18);
         const orderBadge = selected && orderIdx >= 0 ? `
-            <circle cx="${room.x + room.w - 6}" cy="${room.y + 6}" r="10"
+            <circle cx="${room.center_x}" cy="${badgeY}" r="14"
+              fill="none" stroke="rgba(0,0,0,0.5)" stroke-width="2" />
+            <circle cx="${room.center_x}" cy="${badgeY}" r="12"
               fill="rgb(${r},${g},${b})" stroke="white" stroke-width="2" />
-            <text x="${room.x + room.w - 6}" y="${room.y + 6}"
+            <text x="${room.center_x}" y="${badgeY}"
               text-anchor="middle" dominant-baseline="central"
-              fill="white" font-size="11" font-weight="700"
-              font-family="system-ui, sans-serif">
+              fill="white" font-size="12" font-weight="700"
+              font-family="system-ui, sans-serif"
+              paint-order="stroke" stroke="rgba(0,0,0,0.6)" stroke-width="3">
               ${orderIdx + 1}
             </text>
           ` : "";
@@ -1692,75 +1751,7 @@ class DreameVacuumMapCard extends HTMLElement {
 
   _updateConfigSection(card) {
     const section = card.querySelector(".config-section");
-    const showConfig =
-      this._mode !== "edit" && this._mode !== "goto" && (
-        (this._mode === "room" && this._selectedRooms.size > 0) ||
-        (this._mode === "zone" && this._zoneFinalized) ||
-        this._mode === "all"
-      );
-
-    if (!showConfig) {
-      section.innerHTML = "";
-      return;
-    }
-
-    const suctionEntity = this._getState(this._entities.suction_level);
-    const suctionLevel = suctionEntity?.state || "Standard";
-    const cleaningModeEntity = this._getState(this._entities.cleaning_mode);
-    const waterVolumeEntity = this._getState(this._entities.water_volume);
-    const currentMode = cleaningModeEntity?.state || "Sweep & Mop";
-    const currentWater = waterVolumeEntity?.state || "Medium";
-
-    const suctionOptions = ["Quiet", "Standard", "Strong", "Turbo"];
-    const modeOptions = ["Sweeping", "Mopping", "Sweep & Mop"];
-    const waterOptions = ["Low", "Medium", "High"];
-
-    section.innerHTML = `
-      <div class="config-row">
-        <div class="config-group">
-          <span class="config-label">Suction</span>
-          <div class="segmented-control" data-type="suction">
-            ${suctionOptions.map((o) => `<button class="seg-btn ${o === suctionLevel ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
-          </div>
-        </div>
-        <div class="config-group">
-          <span class="config-label">Water</span>
-          <div class="segmented-control" data-type="water">
-            ${waterOptions.map((o) => `<button class="seg-btn ${o === currentWater ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
-          </div>
-        </div>
-        <div class="config-group">
-          <span class="config-label">Mode</span>
-          <div class="segmented-control" data-type="mode">
-            ${modeOptions.map((o) => `<button class="seg-btn ${o === currentMode ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
-          </div>
-        </div>
-      </div>
-    `;
-
-    // Bind segmented control clicks
-    section.querySelectorAll(".seg-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const type = btn.closest(".segmented-control").dataset.type;
-        const value = btn.dataset.value;
-        if (type === "suction") {
-          this._hass.callService("select", "select_option", {
-            entity_id: this._entities.suction_level,
-            option: value,
-          });
-        } else if (type === "water") {
-          this._hass.callService("select", "select_option", {
-            entity_id: this._entities.water_volume,
-            option: value,
-          });
-        } else if (type === "mode") {
-          this._hass.callService("select", "select_option", {
-            entity_id: this._entities.cleaning_mode,
-            option: value,
-          });
-        }
-      });
-    });
+    section.innerHTML = "";
   }
 
   _updateActions(card) {
@@ -1848,18 +1839,55 @@ class DreameVacuumMapCard extends HTMLElement {
         <button class="action-btn primary" data-action="clean">
           <ha-icon icon="mdi:play"></ha-icon> ${label}
         </button>
-        ${state !== "docked" ? `
-        <button class="action-btn secondary" data-action="return_to_base">
-          <ha-icon icon="mdi:home"></ha-icon> Dock
-        </button>` : ""}
+        <button class="action-btn secondary" data-action="dock_menu">
+          <ha-icon icon="mdi:home-variant"></ha-icon> Dock
+        </button>
       `;
     }
 
-    actions.innerHTML = `<div class="action-buttons">${buttons}</div>`;
+    const dockActions = [
+      { key: "mop_wash", label: "Wash Mop", icon: "mdi:water" },
+      { key: "mop_dry", label: "Dry Mop", icon: "mdi:fan" },
+      { key: "dust_collection", label: "Empty Bin", icon: "mdi:delete-variant" },
+    ];
+    const dockMenuHtml = this._dockMenuOpen ? `
+      <div class="dock-menu">
+        ${dockActions.map((a) => `
+          <button class="dock-action-btn" data-entity="${this._entities[a.key]}">
+            <ha-icon icon="${a.icon}"></ha-icon>
+            <span>${a.label}</span>
+          </button>
+        `).join("")}
+        ${state !== "docked" ? `
+        <button class="dock-action-btn" data-action="return_to_base">
+          <ha-icon icon="mdi:home"></ha-icon>
+          <span>Return</span>
+        </button>` : ""}
+      </div>
+    ` : "";
+
+    actions.innerHTML = `<div class="action-buttons">${buttons}</div>${dockMenuHtml}`;
 
     actions.querySelectorAll(".action-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
+        if (btn.dataset.action === "dock_menu") {
+          this._dockMenuOpen = !this._dockMenuOpen;
+          this._updateActions(card);
+          return;
+        }
         this._executeAction(btn.dataset.action);
+      });
+    });
+
+    actions.querySelectorAll(".dock-action-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.action === "return_to_base") {
+          this._executeAction("return_to_base");
+        } else {
+          this._hass.callService("button", "press", {
+            entity_id: btn.dataset.entity,
+          });
+        }
       });
     });
   }
@@ -2112,12 +2140,39 @@ class DreameVacuumMapCard extends HTMLElement {
     const dndEntity = this._getState(this._entities.dnd);
     const dndOn = dndEntity?.state === "on";
 
-    // Buttons
-    const actionBtns = [
-      { key: "mop_wash", label: "Wash Mop", icon: "mdi:water" },
-      { key: "mop_dry", label: "Dry Mop", icon: "mdi:fan" },
-      { key: "dust_collection", label: "Empty Bin", icon: "mdi:delete-variant" },
-    ];
+    // Cleaning config
+    const suctionEntity = this._getState(this._entities.suction_level);
+    const suctionLevel = suctionEntity?.state || "Standard";
+    const cleaningModeEntity = this._getState(this._entities.cleaning_mode);
+    const waterVolumeEntity = this._getState(this._entities.water_volume);
+    const currentMode = cleaningModeEntity?.state || "Sweep & Mop";
+    const currentWater = waterVolumeEntity?.state || "Medium";
+    const suctionOptions = ["Quiet", "Standard", "Strong", "Turbo"];
+    const modeOptions = ["Sweeping", "Mopping", "Sweep & Mop"];
+    const waterOptions = ["Low", "Medium", "High"];
+
+    // Room aliases & visibility
+    const camera = this._getState(this._entities.map);
+    const rooms = camera?.attributes?.rooms || {};
+    const aliases = this._config.room_aliases || {};
+    const hiddenRooms = this._config.hidden_rooms || [];
+    const roomEntries = Object.entries(rooms).sort(([, a], [, b]) => a.name.localeCompare(b.name));
+    const roomAliasesHtml = roomEntries.length > 0
+      ? roomEntries.map(([segId, room]) => {
+          const alias = aliases[segId] || "";
+          const hidden = hiddenRooms.includes(parseInt(segId, 10));
+          return `
+            <div class="settings-alias-row ${hidden ? "settings-alias-hidden" : ""}">
+              <span class="settings-alias-name">${room.name}</span>
+              <input type="text" class="settings-alias-input" data-seg-id="${segId}"
+                placeholder="${room.name}" value="${alias}" />
+              <button class="settings-alias-vis" data-seg-id="${segId}" title="${hidden ? "Show room" : "Hide room"}">
+                <ha-icon icon="${hidden ? "mdi:eye-off" : "mdi:eye"}"></ha-icon>
+              </button>
+            </div>
+          `;
+        }).join("")
+      : '<div style="font-size:12px;color:var(--text-secondary)">No rooms detected yet.</div>';
 
     panel.innerHTML = `
       <div class="settings-header">
@@ -2154,15 +2209,32 @@ class DreameVacuumMapCard extends HTMLElement {
       </div>
 
       <div class="settings-section">
-        <h3>Actions</h3>
-        <div class="settings-actions">
-          ${actionBtns.map((a) => `
-            <button class="settings-action-btn" data-entity="${this._entities[a.key]}">
-              <ha-icon icon="${a.icon}"></ha-icon>
-              <span>${a.label}</span>
-            </button>
-          `).join("")}
+        <h3>Cleaning</h3>
+        <div class="config-row">
+          <div class="config-group">
+            <span class="config-label">Suction</span>
+            <div class="segmented-control" data-type="suction">
+              ${suctionOptions.map((o) => `<button class="seg-btn ${o === suctionLevel ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
+            </div>
+          </div>
+          <div class="config-group">
+            <span class="config-label">Water</span>
+            <div class="segmented-control" data-type="water">
+              ${waterOptions.map((o) => `<button class="seg-btn ${o === currentWater ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
+            </div>
+          </div>
+          <div class="config-group">
+            <span class="config-label">Mode</span>
+            <div class="segmented-control" data-type="mode">
+              ${modeOptions.map((o) => `<button class="seg-btn ${o === currentMode ? "active" : ""}" data-value="${o}">${o}</button>`).join("")}
+            </div>
+          </div>
         </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Room Names</h3>
+        ${roomAliasesHtml}
       </div>
     `;
 
@@ -2190,11 +2262,67 @@ class DreameVacuumMapCard extends HTMLElement {
       });
     });
 
-    panel.querySelectorAll(".settings-action-btn").forEach((btn) => {
+    panel.querySelectorAll(".seg-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        this._hass.callService("button", "press", {
-          entity_id: btn.dataset.entity,
-        });
+        const type = btn.closest(".segmented-control").dataset.type;
+        const value = btn.dataset.value;
+        if (type === "suction") {
+          this._hass.callService("select", "select_option", {
+            entity_id: this._entities.suction_level,
+            option: value,
+          });
+        } else if (type === "water") {
+          this._hass.callService("select", "select_option", {
+            entity_id: this._entities.water_volume,
+            option: value,
+          });
+        } else if (type === "mode") {
+          this._hass.callService("select", "select_option", {
+            entity_id: this._entities.cleaning_mode,
+            option: value,
+          });
+        }
+      });
+    });
+
+    // Room alias inputs
+    panel.querySelectorAll(".settings-alias-input").forEach((input) => {
+      input.addEventListener("input", (e) => {
+        const segId = e.target.dataset.segId;
+        const val = e.target.value.trim();
+        const newAliases = { ...(this._config.room_aliases || {}) };
+        if (val) {
+          newAliases[segId] = val;
+        } else {
+          delete newAliases[segId];
+        }
+        this._config = { ...this._config, room_aliases: newAliases };
+        this._fireConfigChanged();
+        this._updateContent();
+      });
+    });
+
+    // Room visibility toggles
+    panel.querySelectorAll(".settings-alias-vis").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const segId = parseInt(btn.dataset.segId, 10);
+        const hidden = [...(this._config.hidden_rooms || [])];
+        const idx = hidden.indexOf(segId);
+        const isNowHidden = idx < 0;
+        if (idx >= 0) {
+          hidden.splice(idx, 1);
+        } else {
+          hidden.push(segId);
+        }
+        const icon = btn.querySelector("ha-icon");
+        if (icon) icon.setAttribute("icon", isNowHidden ? "mdi:eye-off" : "mdi:eye");
+        btn.title = isNowHidden ? "Show room" : "Hide room";
+        const row = btn.closest(".settings-alias-row");
+        if (row) row.classList.toggle("settings-alias-hidden", isNowHidden);
+
+        this._config = { ...this._config, hidden_rooms: hidden };
+        this._fireConfigChanged();
+        this._updateContent();
       });
     });
   }
@@ -2223,6 +2351,7 @@ class DreameVacuumMapCard extends HTMLElement {
 
       .card-content {
         padding: 0;
+        position: relative;
       }
 
       /* Header */
@@ -2267,6 +2396,7 @@ class DreameVacuumMapCard extends HTMLElement {
         --mdc-icon-size: 20px;
         color: var(--text-secondary);
       }
+      .header-icon-btn,
       .settings-btn {
         background: none;
         border: none;
@@ -2277,11 +2407,16 @@ class DreameVacuumMapCard extends HTMLElement {
         display: flex;
         align-items: center;
       }
+      .header-icon-btn:hover,
       .settings-btn:hover {
         background: var(--surface);
       }
+      .header-icon-btn ha-icon,
       .settings-btn ha-icon {
         --mdc-icon-size: 20px;
+      }
+      .header-icon-btn.active {
+        color: var(--accent);
       }
 
       .stats {
@@ -2571,15 +2706,53 @@ class DreameVacuumMapCard extends HTMLElement {
         background: var(--border);
       }
 
+      /* Dock Menu */
+      .dock-menu {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .dock-action-btn {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 12px 8px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text-primary);
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .dock-action-btn:hover {
+        background: var(--border);
+      }
+      .dock-action-btn ha-icon {
+        --mdc-icon-size: 24px;
+        color: var(--text-secondary);
+      }
+
       /* Settings Panel */
       .settings-panel {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
         max-height: 0;
         overflow: hidden;
         transition: max-height 0.3s ease;
+        background: var(--card-bg);
+        z-index: 10;
       }
       .settings-panel.open {
-        max-height: 800px;
+        max-height: 70vh;
+        overflow-y: auto;
         border-top: 1px solid var(--border);
+        box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
       }
       .settings-header {
         display: flex;
@@ -2753,6 +2926,57 @@ class DreameVacuumMapCard extends HTMLElement {
       .settings-action-btn ha-icon {
         --mdc-icon-size: 22px;
         color: var(--accent);
+      }
+
+      /* Room aliases in settings */
+      .settings-alias-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .settings-alias-name {
+        font-size: 13px;
+        color: var(--text-secondary);
+        min-width: 70px;
+        flex-shrink: 0;
+      }
+      .settings-alias-input {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 13px;
+        background: var(--surface);
+        color: var(--text-primary);
+        outline: none;
+      }
+      .settings-alias-input:focus {
+        border-color: var(--accent);
+      }
+      .settings-alias-vis {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 6px;
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .settings-alias-vis:hover {
+        background: var(--surface);
+      }
+      .settings-alias-vis ha-icon {
+        --mdc-icon-size: 18px;
+        pointer-events: none;
+      }
+      .settings-alias-row.settings-alias-hidden {
+        opacity: 0.45;
+      }
+      .settings-alias-row.settings-alias-hidden .settings-alias-input {
+        text-decoration: line-through;
       }
 
       /* Edit Mode */
