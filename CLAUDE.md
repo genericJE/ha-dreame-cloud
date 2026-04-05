@@ -6,7 +6,7 @@ Custom Home Assistant integration for Dreame robot vacuums via the Dreame cloud 
 
 - `custom_components/dreame_cloud/` is the HA integration
 - `dreame_mocker` package (pip-installed) provides the cloud API client and map decoder
-- The map card is a vanilla JS custom Lovelace card at `www/dreame-vacuum-map-card.js`
+- The map card is a vanilla JS custom Lovelace card at `custom_components/dreame_cloud/www/dreame-vacuum-map-card.js`
 
 ## Map data pipeline
 
@@ -94,6 +94,16 @@ The forward transform applies `flip_x → flip_y → rotate(N steps) → scale`.
 The reverse applies `÷scale → rotate(N inverse steps) → reverse flip_y → reverse flip_x → to vacuum`.
 The rotation inverse step `(x,y) → (y, curW-1-x)` is iterated `rotation/90` times (not `(360-rotation)/90`, which would apply the forward step instead).
 
+## CI and tooling
+
+GitHub Actions CI runs on push/PR to main:
+- **ruff**: lint with `select = ["ALL"]` minus HA-incompatible rules. Config in `pyproject.toml`.
+- **pyright**: strict mode typecheck (non-blocking, existing violations). Type stubs for `dreame-mocker` are in `stubs/`.
+- **JS syntax**: `node --check` on the map card JS.
+- **version-sync**: verifies `pyproject.toml` and `manifest.json` versions match.
+
+Dev dependencies: `pyright`, `ruff` (install via `uv sync`).
+
 ## Deployment to HA
 
 Python file changes require HA restart. JS changes require resource URL version bump + new browser tab.
@@ -166,9 +176,9 @@ The map card's edit mode lets users draw/delete zones (no-go, virtual walls, thr
 
 1. JS card converts drawn image coords to vacuum coords via `_imageToVacuumCoords`
 2. Calls `dreame_cloud.update_map` service with zone arrays
-3. `vacuum.py` sends `send_action(6, 2)` to the vacuum and caches the sent data in `coordinator._pending_zone_update`
-4. `coordinator._last_map_update` is reset to 0 to bypass the idle throttle
-5. `camera.py`'s `_handle_coordinator_update` re-renders the map, overlaying `_pending_zone_update` onto stale `rism` data
+3. `vacuum.py` sends `send_action(6, 2)` to the vacuum and caches the sent data via `coordinator.set_pending_zone_update()`
+4. `coordinator.reset_map_cache()` is called to bypass the idle throttle
+5. `camera.py`'s `_handle_coordinator_update` re-renders the map, overlaying `coordinator.pending_zone_update` onto stale `rism` data
 6. The entity updates immediately with the new zone positions
 
 The pending overlay is necessary because the cloud's `rism` blob updates lazily (minutes to hours). Without it, deleted zones reappear from stale `rism` data.
