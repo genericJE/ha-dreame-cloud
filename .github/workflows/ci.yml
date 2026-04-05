@@ -21,9 +21,8 @@ jobs:
       - name: Install dependencies (skip private dreame-mocker, stubs are used)
         run: |
           uv venv
-          uv pip install homeassistant Pillow numpy
-          uv pip install pyright
-      - run: uv run pyright custom_components
+          uv pip install homeassistant Pillow numpy pyright
+      - run: .venv/bin/pyright custom_components
 
   version-sync:
     runs-on: ubuntu-latest
