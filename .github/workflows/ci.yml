@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dependencies (skip private dreame-mocker, stubs are used)
+        run: |
+          uv venv
+          uv pip install homeassistant Pillow numpy
+          uv pip install pyright
+      - run: uv run pyright custom_components
+
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check pyproject.toml and manifest.json versions match
+        run: |
+          PYPROJECT=$(python3 -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          MANIFEST=$(python3 -c "import json, pathlib; print(json.loads(pathlib.Path('custom_components/dreame_cloud/manifest.json').read_text())['version'])")
+          if [ "$PYPROJECT" != "$MANIFEST" ]; then
+            echo "::error::Version mismatch: pyproject.toml=$PYPROJECT manifest.json=$MANIFEST"
+            exit 1
+          fi
+          echo "Versions match: $PYPROJECT"
+
+  js-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check custom_components/dreame_cloud/www/dreame-vacuum-map-card.js
