@@ -1,15 +1,9 @@
-"""Type stubs for dreame_mocker.client."""
-
-from __future__ import annotations
-
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, Self
 
-
 class DreameError(Exception): ...
 class AuthenticationError(DreameError): ...
-
 
 class DreameCloud:
     def __init__(
@@ -32,7 +26,6 @@ class DreameCloud:
         exc_tb: TracebackType | None,
     ) -> None: ...
 
-
 class DreameDevice:
     @property
     def model(self) -> str: ...
@@ -40,7 +33,6 @@ class DreameDevice:
     def name(self) -> str: ...
     @property
     def did(self) -> str: ...
-
     async def start(self) -> None: ...
     async def pause(self) -> None: ...
     async def stop(self) -> None: ...
@@ -51,16 +43,19 @@ class DreameDevice:
     async def set_dnd(self, enabled: bool) -> None: ...
     async def set_volume(self, volume: int) -> None: ...
     async def get_properties(
-        self, properties: list[Any],
+        self,
+        properties: list[Any],
     ) -> list[dict[str, Any]]: ...
     async def get_map(self, req_type: int = ...) -> DreameMap: ...
     async def send_action(
-        self, siid: int, aiid: int, params: list[Any] | None = ...,
+        self,
+        siid: int,
+        aiid: int,
+        params: list[Any] | None = ...,
     ) -> dict[str, Any]: ...
     async def start_mop_wash(self) -> None: ...
     async def start_mop_dry(self) -> None: ...
     async def start_dust_collection(self) -> None: ...
-
 
 @dataclass
 class DeviceStatus:
@@ -73,7 +68,6 @@ class DeviceStatus:
     cleaning_mode: int
     cleaning_time: int
     cleaning_area: int
-
 
 @dataclass
 class MapHeader:
@@ -88,7 +82,6 @@ class MapHeader:
     charger_x: int
     charger_y: int
     frame_id: int
-
 
 class DreameMap:
     header: MapHeader

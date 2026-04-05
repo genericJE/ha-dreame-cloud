@@ -1,7 +1,4 @@
-"""Type stubs for dreame_mocker.const."""
-
 from enum import IntEnum
-
 
 class DeviceState(IntEnum):
     SWEEPING = ...
@@ -18,8 +15,6 @@ class DeviceState(IntEnum):
     MOP_WASHING = ...
     MOP_WASHING_PAUSED = ...
 
-
-# Property values are (siid, piid) tuples used as dict keys.
 class Property:
     STATE: tuple[int, int]
     BATTERY_LEVEL: tuple[int, int]
@@ -35,6 +30,5 @@ class Property:
     MOP_PAD_LIFE_LEVEL: tuple[int, int]
     DND_ENABLED: tuple[int, int]
     VOLUME: tuple[int, int]
-
 
 STATES: dict[int, str]

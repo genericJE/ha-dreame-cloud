@@ -23,7 +23,7 @@ jobs:
           uv venv
           uv pip install homeassistant Pillow numpy pyright
           uv pip install "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git"
-      - run: .venv/bin/pyright custom_components
+      - run: .venv/bin/pyright --pythonpath .venv/bin/python custom_components
 
   version-sync:
     runs-on: ubuntu-latest
