@@ -16,6 +16,16 @@ Custom Home Assistant integration for Dreame robot vacuums via the Dreame cloud 
 4. `camera.py` renders the pixel grid to PNG and exposes metadata as entity attributes
 5. The JS card reads the camera entity's image + attributes to draw the interactive map
 
+## Offline map cache
+
+The coordinator persists map data and device info to `.storage/dreame_cloud_map_cache.json` on every successful map fetch. This enables the integration to display the last known map when the robot is offline.
+
+- **Cache format**: JSON with `header` (MapHeader fields), `pixels` (base64), `rooms`, `metadata` (raw map JSON), and `device` (model, name, did)
+- **Startup**: `async_load_map_cache()` is called before the first coordinator refresh. If the cloud is unreachable but a cache exists, the coordinator returns an "Offline" status with the cached map instead of raising `UpdateFailed`
+- **Mid-session disconnect**: If property fetches fail after a successful connection, the coordinator returns `_last_good_data` (in-memory) rather than marking entities unavailable
+- **Auth errors are not cached**: `ConfigEntryAuthFailed` always propagates (bad credentials should not be silently ignored)
+- **First-ever setup**: Still requires a live connection to discover the device. The cache only helps on subsequent startups
+
 ## Pixel encoding
 
 Each pixel byte uses bitmask encoding:

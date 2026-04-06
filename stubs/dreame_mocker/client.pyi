@@ -82,6 +82,9 @@ class MapHeader:
     charger_x: int
     charger_y: int
     frame_id: int
+    map_id: int
+    frame_type: int
+    charger_angle: int
 
 class DreameMap:
     header: MapHeader
