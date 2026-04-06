@@ -35,12 +35,14 @@ async def async_setup_entry(
 
     coordinator = DreameCloudCoordinator(
         hass,
+        entry=entry,
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
         region=entry.data.get(CONF_REGION, "eu"),
         host=entry.data.get(CONF_HOST),
         port=entry.data.get(CONF_PORT, DEFAULT_PORT),
     )
+    await coordinator.async_load_map_cache()
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

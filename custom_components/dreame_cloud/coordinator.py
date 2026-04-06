@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -21,6 +24,7 @@ from dreame_mocker.client import (
     DreameDevice,
     DreameError,
     DreameMap,
+    MapHeader,
 )
 from dreame_mocker.const import STATES, DeviceState, Property
 
@@ -46,6 +50,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     def __init__(
         self,
         hass: HomeAssistant,
+        entry: ConfigEntry[DreameCloudData],
         username: str,
         password: str,
         region: str,
@@ -57,6 +62,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             hass,
             _LOGGER,
             name="Dreame Cloud Vacuum",
+            config_entry=entry,
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
         self._cloud = DreameCloud(
@@ -71,14 +77,10 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         self._last_map_update: float = 0
         self._connected = False
         self._pending_zone_update: dict[str, Any] | None = None
-
-    @property
-    def config_entry(self) -> ConfigEntry[DreameCloudData]:
-        """Return the config entry (guaranteed non-None for this coordinator)."""
-        entry = super().config_entry
-        if entry is None:
-            raise RuntimeError("Config entry not set")
-        return entry
+        self._last_good_data: DreameCloudData | None = None
+        self._cached_device_model: str | None = None
+        self._cached_device_name: str | None = None
+        self._cached_device_id: str | None = None
 
     @property
     def device(self) -> DreameDevice:
@@ -90,17 +92,107 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     @property
     def device_model(self) -> str:
         """Return device model."""
-        return self.device.model
+        if self._device is not None:
+            return self._device.model
+        if self._cached_device_model is not None:
+            return self._cached_device_model
+        raise RuntimeError("Device not initialized and no cache available")
 
     @property
     def device_name(self) -> str:
         """Return device name."""
-        return self.device.name
+        if self._device is not None:
+            return self._device.name
+        if self._cached_device_name is not None:
+            return self._cached_device_name
+        raise RuntimeError("Device not initialized and no cache available")
 
     @property
     def device_id(self) -> str:
         """Return device ID."""
-        return self.device.did
+        if self._device is not None:
+            return self._device.did
+        if self._cached_device_id is not None:
+            return self._cached_device_id
+        raise RuntimeError("Device not initialized and no cache available")
+
+    @property
+    def _cache_path(self) -> Path:
+        """Return the path for the map cache file."""
+        return Path(self.hass.config.path(f".storage/dreame_cloud_map_cache.json"))
+
+    async def async_load_map_cache(self) -> None:
+        """Load the cached map and device info from disk (called before first refresh)."""
+        path = self._cache_path
+        try:
+            result = await self.hass.async_add_executor_job(self._read_map_cache, path)
+        except (OSError, json.JSONDecodeError, KeyError, ValueError):
+            _LOGGER.debug("No usable map cache at %s", path)
+            return
+        if result is None:
+            return
+        map_data, device_info = result
+        self._map_data = map_data
+        self._last_good_data = DreameCloudData(
+            status=DeviceStatus(
+                state=0, state_name="Offline", battery=0, error=0,
+                suction_level=0, water_volume=0, cleaning_mode=0,
+                cleaning_time=0, cleaning_area=0,
+            ),
+            map_data=map_data,
+        )
+        if device_info:
+            self._cached_device_model = device_info.get("model")
+            self._cached_device_name = device_info.get("name")
+            self._cached_device_id = device_info.get("did")
+        _LOGGER.info("Loaded cached map from disk (%s)", path)
+
+    @staticmethod
+    def _read_map_cache(path: Path) -> tuple[DreameMap, dict[str, str]] | None:
+        """Deserialize a DreameMap and device info from a JSON cache file."""
+        if not path.is_file():
+            return None
+        raw = json.loads(path.read_text())
+        header = MapHeader.__new__(MapHeader)
+        for k, v in raw["header"].items():
+            setattr(header, k, v)
+        pixels = base64.b64decode(raw["pixels"])
+        rooms: dict[int, Any] = {int(k): v for k, v in raw["rooms"].items()}
+        metadata: dict[str, Any] = raw["metadata"]
+        m = DreameMap.__new__(DreameMap)
+        m.header = header
+        m.pixels = pixels
+        m.rooms = rooms
+        m.raw_metadata = metadata
+        device_info: dict[str, str] = raw.get("device", {})
+        return m, device_info
+
+    def _write_map_cache(self, map_data: DreameMap) -> None:
+        """Serialize a DreameMap and device info to the JSON cache file."""
+        h = map_data.header
+        header_dict = {k: v for k, v in vars(h).items() if not k.startswith("_")}
+        payload: dict[str, Any] = {
+            "header": header_dict,
+            "pixels": base64.b64encode(map_data.pixels).decode(),
+            "rooms": map_data.rooms,
+            "metadata": map_data.raw_metadata,
+        }
+        if self._device is not None:
+            payload["device"] = {
+                "model": self._device.model,
+                "name": self._device.name,
+                "did": self._device.did,
+            }
+        path = self._cache_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload))
+
+    async def _async_save_map_cache(self, map_data: DreameMap) -> None:
+        """Save map data to disk in the executor."""
+        try:
+            await self.hass.async_add_executor_job(self._write_map_cache, map_data)
+        except OSError:
+            _LOGGER.warning("Failed to write map cache to %s", self._cache_path)
 
     async def _async_setup(self) -> None:
         """Set up the coordinator — connect and find the device."""
@@ -119,7 +211,25 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     async def _async_update_data(self) -> DreameCloudData:
         """Fetch data from the device."""
         if not self._connected:
-            await self._async_setup()
+            try:
+                await self._async_setup()
+            except ConfigEntryAuthFailed:
+                raise
+            except UpdateFailed:
+                if self._last_good_data is not None:
+                    _LOGGER.debug("Connection failed, returning cached data")
+                    return self._last_good_data
+                if self._map_data is not None:
+                    _LOGGER.debug("Connection failed, returning cached map only")
+                    return DreameCloudData(
+                        status=DeviceStatus(
+                            state=0, state_name="Offline", battery=0, error=0,
+                            suction_level=0, water_volume=0, cleaning_mode=0,
+                            cleaning_time=0, cleaning_area=0,
+                        ),
+                        map_data=self._map_data,
+                    )
+                raise
 
         try:
             # Single RPC call for all properties (status + consumables + extras).
@@ -189,21 +299,27 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                     async with asyncio.timeout(15):
                         self._map_data = await self.device.get_map()
                     self._last_map_update = now
+                    await self._async_save_map_cache(self._map_data)
                 except (DreameError, TimeoutError):
                     _LOGGER.debug("Map update failed, using cached map")
 
-            return DreameCloudData(
+            data = DreameCloudData(
                 status=status,
                 map_data=self._map_data,
                 consumables=consumables,
                 dnd_enabled=dnd_enabled,
                 volume=volume,
             )
+            self._last_good_data = data
+            return data
         except AuthenticationError as err:
             self._connected = False
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
-        except DreameError as err:
+        except Exception as err:  # noqa: BLE001
             self._connected = False
+            if self._last_good_data is not None:
+                _LOGGER.debug("Update failed, returning cached data: %s", err)
+                return self._last_good_data
             raise UpdateFailed(f"Update failed: {err}") from err
 
     @property
