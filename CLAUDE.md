@@ -16,6 +16,15 @@ Custom Home Assistant integration for Dreame robot vacuums via the Dreame cloud 
 4. `image.py` renders the pixel grid to PNG and exposes metadata as entity attributes
 5. The JS card reads the image entity's image + attributes to draw the interactive map
 
+## Map polling architecture
+
+Two independent loops feed the image entity:
+
+- **Property loop** (`DataUpdateCoordinator.update_interval = 30s`). Calls `device.get_properties(...)` for status, battery, error, suction/water level, cleaning mode/time/area, consumable life levels, DnD, and volume. Seeds the map exactly once per successful connect (`_seeded_this_connect` flag — not `_map_data is None`, because the offline cache may have already populated it from disk).
+- **Fast map loop** (`async_track_time_interval`, `MAP_FAST_POLL_INTERVAL_CLEANING = 2s`). Started when state enters SWEEPING / MOPPING / SWEEP_AND_MOP, stopped when it leaves. Calls `device.get_map()` only — no property RPC — and pushes the result via `async_set_updated_data` so listeners rerender. Torn down in `async_disconnect`.
+
+When the robot is dormant, the map sits at its last value with no background fetches. Room renames or zone edits made via the Dreame app while docked will not appear in HA until the next cleaning cycle starts.
+
 ## Offline map cache
 
 The coordinator persists map data and device info to `.storage/dreame_cloud_map_cache.json` on every successful map fetch. This enables the integration to display the last known map when the robot is offline.
@@ -151,6 +160,15 @@ curl -s -X POST http://homeassistant.local:8123/api/services/homeassistant/resta
 Entity IDs are derived from the device name, not the integration domain:
 - `vacuum.x50_ultra_complete_vacuum` (not `vacuum.dreame_cloud_vacuum`)
 - `image.x50_ultra_complete_floor_plan` (not `image.dreame_cloud_vacuum_floor_plan`)
+
+## Card entity resolution
+
+The map card resolves which image entity to render in this order:
+
+1. Explicit `map_entity` in the card config (set via the visual editor or YAML).
+2. Auto-derived from the configured `entity` (vacuum) — strips the `vacuum.` prefix and the trailing `_vacuum` slug, then prepends `image.` and appends `_floor_plan`. So `vacuum.x50_ultra_complete_vacuum` becomes `image.x50_ultra_complete_floor_plan`.
+
+The auto-derivation handles the common case. When upgrading from a release that used `camera.*_map`, any dashboard with an explicit `map_entity` override will continue pointing at the now-nonexistent camera and render blank — the user must clear the override or update it to the new image entity ID. Dashboards live in `/config/.storage/lovelace.dashboard_<name>` (or in YAML mode, the user's `ui-lovelace.yaml`).
 
 ## Furniture detection
 
