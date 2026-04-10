@@ -40,7 +40,7 @@ export class DreameVacuumMapCardEditor extends HTMLElement {
   _getMapEntities() {
     if (!this._hass) return [];
     return Object.keys(this._hass.states)
-      .filter((id) => id.startsWith("camera.") && id.includes("map"))
+      .filter((id) => id.startsWith("image.") && id.includes("floor_plan"))
       .map((id) => ({
         id,
         name: this._hass.states[id].attributes.friendly_name || id,
@@ -52,7 +52,7 @@ export class DreameVacuumMapCardEditor extends HTMLElement {
     const entity = this._config.entity || "";
     if (this._config.map_entity) return this._config.map_entity;
     const base = entity.replace("vacuum.", "").replace(/_vacuum$/, "");
-    return base ? `camera.${base}_map` : "";
+    return base ? `image.${base}_floor_plan` : "";
   }
 
   _getRooms() {

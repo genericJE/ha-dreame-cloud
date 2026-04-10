@@ -8,14 +8,17 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+if TYPE_CHECKING:
+    from . import DreameCloudConfigEntry
 
 from dreame_mocker.client import (
     AuthenticationError,
@@ -28,7 +31,7 @@ from dreame_mocker.client import (
 )
 from dreame_mocker.const import STATES, DeviceState, Property
 
-from .const import DEFAULT_PORT, DEFAULT_SCAN_INTERVAL, MAP_UPDATE_INTERVAL_CLEANING, MAP_UPDATE_INTERVAL_IDLE
+from .const import DEFAULT_PORT, DEFAULT_SCAN_INTERVAL, MAP_FAST_POLL_INTERVAL_CLEANING
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,10 +50,12 @@ class DreameCloudData:
 class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     """Coordinate data updates from Dreame cloud."""
 
+    config_entry: DreameCloudConfigEntry
+
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry[DreameCloudData],
+        entry: DreameCloudConfigEntry,
         username: str,
         password: str,
         region: str,
@@ -81,6 +86,8 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         self._cached_device_model: str | None = None
         self._cached_device_name: str | None = None
         self._cached_device_id: str | None = None
+        self._fast_map_unsub: CALLBACK_TYPE | None = None
+        self._seeded_this_connect: bool = False
 
     @property
     def device(self) -> DreameDevice:
@@ -119,7 +126,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     @property
     def _cache_path(self) -> Path:
         """Return the path for the map cache file."""
-        return Path(self.hass.config.path(f".storage/dreame_cloud_map_cache.json"))
+        return Path(self.hass.config.path(".storage/dreame_cloud_map_cache.json"))
 
     async def async_load_map_cache(self) -> None:
         """Load the cached map and device info from disk (called before first refresh)."""
@@ -201,6 +208,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 await self._cloud.connect()
                 self._device = await self._cloud.get_device()
             self._connected = True
+            self._seeded_this_connect = False
         except TimeoutError as err:
             raise UpdateFailed("Connection to Dreame cloud timed out") from err
         except AuthenticationError as err:
@@ -283,25 +291,33 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             dnd_enabled = bool(values.get(Property.DND_ENABLED, False))
             volume = int(values.get(Property.VOLUME, 50))
 
-            # Update map periodically
-            now = time.monotonic()
             is_cleaning = status.state in (
                 DeviceState.SWEEPING,
                 DeviceState.MOPPING,
                 DeviceState.SWEEP_AND_MOP,
             )
-            map_interval = (
-                MAP_UPDATE_INTERVAL_CLEANING if is_cleaning else MAP_UPDATE_INTERVAL_IDLE
-            )
 
-            if now - self._last_map_update >= map_interval:
+            # Seed the map once per connect.  After that the fast
+            # poll loop refreshes it while cleaning, and we leave it
+            # alone while the robot is dormant.  Note: we don't gate
+            # this on `_map_data is None` because the disk cache may
+            # have already populated it; we still want a live fetch
+            # the first time we successfully reach the cloud.
+            if not self._seeded_this_connect:
                 try:
                     async with asyncio.timeout(15):
                         self._map_data = await self.device.get_map()
-                    self._last_map_update = now
+                    self._last_map_update = time.monotonic()
+                    self._seeded_this_connect = True
                     await self._async_save_map_cache(self._map_data)
                 except (DreameError, TimeoutError):
-                    _LOGGER.debug("Map update failed, using cached map")
+                    _LOGGER.debug("Initial map fetch failed")
+
+            # Toggle the fast map poll loop based on cleaning state.
+            if is_cleaning:
+                self._start_fast_map_poll()
+            else:
+                self._stop_fast_map_poll()
 
             data = DreameCloudData(
                 status=status,
@@ -310,40 +326,82 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 dnd_enabled=dnd_enabled,
                 volume=volume,
             )
-            self._last_good_data = data
-            return data
         except AuthenticationError as err:
             self._connected = False
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             self._connected = False
             if self._last_good_data is not None:
                 _LOGGER.debug("Update failed, returning cached data: %s", err)
                 return self._last_good_data
             raise UpdateFailed(f"Update failed: {err}") from err
+        else:
+            self._last_good_data = data
+            return data
 
     @property
     def pending_zone_update(self) -> dict[str, Any] | None:
-        """Return the pending zone update overlay (used by camera rendering)."""
+        """Return the pending zone update overlay (used by image rendering)."""
         return self._pending_zone_update
 
     def set_pending_zone_update(self, update: dict[str, Any] | None) -> None:
         """Cache zone data sent to the vacuum for immediate rendering.
 
-        The cloud's saved map blob (rism) updates lazily, so the camera
-        uses this overlay to show the user's edits immediately.
+        The cloud's saved map blob (rism) updates lazily, so the image
+        entity uses this overlay to show the user's edits immediately.
         """
         self._pending_zone_update = update
 
     def reset_map_cache(self) -> None:
-        """Force the next refresh to re-fetch map data (bypass idle throttle)."""
+        """Force the next fast tick to re-fetch map data."""
         self._last_map_update = 0
 
     def set_map_data(self, map_data: DreameMap) -> None:
         """Replace the cached map data (used by request_map for investigation)."""
         self._map_data = map_data
 
+    def _start_fast_map_poll(self) -> None:
+        """Start the fast map poll loop if not already running."""
+        if self._fast_map_unsub is not None:
+            return
+        self._fast_map_unsub = async_track_time_interval(
+            self.hass,
+            self._async_fast_map_tick,
+            timedelta(seconds=MAP_FAST_POLL_INTERVAL_CLEANING),
+        )
+
+    def _stop_fast_map_poll(self) -> None:
+        """Stop the fast map poll loop if running."""
+        if self._fast_map_unsub is None:
+            return
+        self._fast_map_unsub()
+        self._fast_map_unsub = None
+
+    async def _async_fast_map_tick(self, _now: datetime) -> None:
+        """Fetch the map and push fresh data to listeners."""
+        if self._device is None:
+            return
+        try:
+            async with asyncio.timeout(15):
+                new_map = await self.device.get_map()
+        except (DreameError, TimeoutError):
+            _LOGGER.debug("Fast map poll fetch failed")
+            return
+        self._map_data = new_map
+        self._last_map_update = time.monotonic()
+        await self._async_save_map_cache(new_map)
+        self.async_set_updated_data(
+            DreameCloudData(
+                status=self.data.status,
+                map_data=new_map,
+                consumables=self.data.consumables,
+                dnd_enabled=self.data.dnd_enabled,
+                volume=self.data.volume,
+            )
+        )
+
     async def async_disconnect(self) -> None:
         """Disconnect from the cloud."""
+        self._stop_fast_map_poll()
         await self._cloud.disconnect()
         self._connected = False

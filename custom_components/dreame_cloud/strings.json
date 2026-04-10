@@ -29,9 +29,9 @@
         "name": "Vacuum"
       }
     },
-    "camera": {
-      "map": {
-        "name": "Map"
+    "image": {
+      "floor_plan": {
+        "name": "Floor Plan"
       }
     },
     "sensor": {

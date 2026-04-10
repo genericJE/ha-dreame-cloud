@@ -13,8 +13,17 @@ Custom Home Assistant integration for Dreame robot vacuums via the Dreame cloud 
 1. Vacuum stores map in Dreame cloud as an encrypted binary blob
 2. `dreame_mocker.client.MapDecoder` downloads, decrypts (AES-256-CBC), decompresses (zlib), and parses it
 3. Binary format: 27-byte header (`<2hb11h`) + pixel grid (1 byte/pixel) + trailing JSON metadata
-4. `camera.py` renders the pixel grid to PNG and exposes metadata as entity attributes
-5. The JS card reads the camera entity's image + attributes to draw the interactive map
+4. `image.py` renders the pixel grid to PNG and exposes metadata as entity attributes
+5. The JS card reads the image entity's image + attributes to draw the interactive map
+
+## Map polling architecture
+
+Two independent loops feed the image entity:
+
+- **Property loop** (`DataUpdateCoordinator.update_interval = 30s`). Calls `device.get_properties(...)` for status, battery, error, suction/water level, cleaning mode/time/area, consumable life levels, DnD, and volume. Seeds the map exactly once per successful connect (`_seeded_this_connect` flag — not `_map_data is None`, because the offline cache may have already populated it from disk).
+- **Fast map loop** (`async_track_time_interval`, `MAP_FAST_POLL_INTERVAL_CLEANING = 2s`). Started when state enters SWEEPING / MOPPING / SWEEP_AND_MOP, stopped when it leaves. Calls `device.get_map()` only — no property RPC — and pushes the result via `async_set_updated_data` so listeners rerender. Torn down in `async_disconnect`.
+
+When the robot is dormant, the map sits at its last value with no background fetches. Room renames or zone edits made via the Dreame app while docked will not appear in HA until the next cleaning cycle starts.
 
 ## Offline map cache
 
@@ -71,7 +80,7 @@ The live map frame (req_type=1) omits zone configuration (virtual walls, no-go z
 
 - **Encoding**: URL-safe base64 → zlib decompress → same binary format (27-byte header + pixels + trailing JSON)
 - **Contains**: `vw` (virtual walls, no-go zones, cliffs), `vws` (passable/impassable thresholds, ramps), `sneak_areas` (low-clearance zones)
-- `camera.py` decodes `rism` and merges its zone data when the live frame lacks it
+- `image.py` decodes `rism` and merges its zone data when the live frame lacks it
 
 ### Zone configuration data locations
 
@@ -97,7 +106,7 @@ Carpet detection on this model is pixel-level only (0x40 bitmask), not metadata-
 
 ### Coordinate transform pipeline
 
-Python (`camera.py`): vacuum → pixel → flip → rotate → scale = image coords
+Python (`image.py`): vacuum → pixel → flip → rotate → scale = image coords
 JS (`_imageToVacuumCoords`): image → reverse scale → reverse rotate → reverse flip → pixel → vacuum coords
 
 The forward transform applies `flip_x → flip_y → rotate(N steps) → scale`.
@@ -150,7 +159,16 @@ curl -s -X POST http://homeassistant.local:8123/api/services/homeassistant/resta
 
 Entity IDs are derived from the device name, not the integration domain:
 - `vacuum.x50_ultra_complete_vacuum` (not `vacuum.dreame_cloud_vacuum`)
-- `camera.x50_ultra_complete_map` (not `camera.dreame_cloud_vacuum_map`)
+- `image.x50_ultra_complete_floor_plan` (not `image.dreame_cloud_vacuum_floor_plan`)
+
+## Card entity resolution
+
+The map card resolves which image entity to render in this order:
+
+1. Explicit `map_entity` in the card config (set via the visual editor or YAML).
+2. Auto-derived from the configured `entity` (vacuum) — strips the `vacuum.` prefix and the trailing `_vacuum` slug, then prepends `image.` and appends `_floor_plan`. So `vacuum.x50_ultra_complete_vacuum` becomes `image.x50_ultra_complete_floor_plan`.
+
+The auto-derivation handles the common case. When upgrading from a release that used `camera.*_map`, any dashboard with an explicit `map_entity` override will continue pointing at the now-nonexistent camera and render blank — the user must clear the override or update it to the new image entity ID. Dashboards live in `/config/.storage/lovelace.dashboard_<name>` (or in YAML mode, the user's `ui-lovelace.yaml`).
 
 ## Furniture detection
 
@@ -194,7 +212,7 @@ Source: Tasshack/dreame-vacuum dev branch `FurnitureType` enum. Types 27-31 exis
 
 ### Current rendering
 
-`camera.py` transforms `ai_furniture_user` items to image coordinates and exposes them as entity attributes. The JS card draws dashed rectangles with centered name labels. No editing support yet (place, move, resize, rotate, delete).
+`image.py` transforms `ai_furniture_user` items to image coordinates and exposes them as entity attributes. The JS card draws dashed rectangles with centered name labels. No editing support yet (place, move, resize, rotate, delete).
 
 ## Zone editing data flow
 
@@ -204,7 +222,7 @@ The map card's edit mode lets users draw/delete zones (no-go, virtual walls, thr
 2. Calls `dreame_cloud.update_map` service with zone arrays
 3. `vacuum.py` sends `send_action(6, 2)` to the vacuum and caches the sent data via `coordinator.set_pending_zone_update()`
 4. `coordinator.reset_map_cache()` is called to bypass the idle throttle
-5. `camera.py`'s `_handle_coordinator_update` re-renders the map, overlaying `coordinator.pending_zone_update` onto stale `rism` data
+5. `image.py`'s `_handle_coordinator_update` re-renders the map, overlaying `coordinator.pending_zone_update` onto stale `rism` data
 6. The entity updates immediately with the new zone positions
 
 The pending overlay is necessary because the cloud's `rism` blob updates lazily (minutes to hours). Without it, deleted zones reappear from stale `rism` data.

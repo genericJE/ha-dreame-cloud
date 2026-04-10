@@ -6,7 +6,7 @@ DOMAIN = "dreame_cloud"
 
 PLATFORMS = [
     Platform.VACUUM,
-    Platform.CAMERA,
+    Platform.IMAGE,
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
     Platform.SWITCH,
@@ -24,8 +24,7 @@ CONF_MAP_FLIP_Y = "map_flip_y"
 DEFAULT_REGION = "eu"
 DEFAULT_PORT = 13267
 DEFAULT_SCAN_INTERVAL = 30  # seconds
-MAP_UPDATE_INTERVAL_CLEANING = 5  # seconds
-MAP_UPDATE_INTERVAL_IDLE = 300  # seconds (5 minutes)
+MAP_FAST_POLL_INTERVAL_CLEANING = 2  # seconds — fast map poll while cleaning
 
 # Fan speed names
 FAN_SPEED_QUIET = "Quiet"
