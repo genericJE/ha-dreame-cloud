@@ -129,4 +129,4 @@ The integration uses the `dreame-mocker` client library which handles:
 
 ## License
 
-Private -- not for redistribution.
+[MIT](LICENSE)
