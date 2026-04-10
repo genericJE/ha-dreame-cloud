@@ -2,6 +2,8 @@
 name = "ha-dreame-cloud"
 version = "0.3.4"
 description = "Dreame Cloud Vacuum integration for Home Assistant"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "homeassistant>=2025.1.0",
