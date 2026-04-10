@@ -1,4 +1,4 @@
-"""Camera platform for Dreame Cloud Vacuum map."""
+"""Image platform for Dreame Cloud Vacuum floor plan."""
 
 from __future__ import annotations
 
@@ -8,10 +8,11 @@ import json
 import logging
 import struct
 import zlib
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import numpy as np
-from homeassistant.components.camera import Camera
+from homeassistant.components.image import ImageEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from PIL import Image, ImageDraw
@@ -39,21 +40,24 @@ async def async_setup_entry(
     entry: DreameCloudConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the camera platform."""
+    """Set up the image platform."""
     coordinator: DreameCloudCoordinator = entry.runtime_data
-    async_add_entities([DreameCloudMapCamera(coordinator)])
+    async_add_entities([DreameCloudMapImage(hass, coordinator)])
 
 
-class DreameCloudMapCamera(DreameCloudEntity, Camera):
-    """Camera entity showing the vacuum map."""
+class DreameCloudMapImage(DreameCloudEntity, ImageEntity):
+    """Image entity showing the vacuum floor plan."""
 
-    _attr_translation_key = "map"
+    _attr_translation_key = "floor_plan"
+    _attr_content_type = "image/png"
 
-    def __init__(self, coordinator: DreameCloudCoordinator) -> None:
+    def __init__(
+        self, hass: HomeAssistant, coordinator: DreameCloudCoordinator
+    ) -> None:
         """Initialize."""
         DreameCloudEntity.__init__(self, coordinator)
-        Camera.__init__(self)
-        self._attr_unique_id = f"{coordinator.device_id}_map"
+        ImageEntity.__init__(self, hass)
+        self._attr_unique_id = f"{coordinator.device_id}_floor_plan"
         self._image: bytes | None = None
         self._map_attrs: dict[str, Any] = {}
         self._last_frame_id: int | None = None
@@ -76,11 +80,6 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
         """Trigger a coordinator update when map options change."""
         coordinator: DreameCloudCoordinator = entry.runtime_data
         coordinator.async_set_updated_data(coordinator.data)
-
-    @property
-    def frame_interval(self) -> float:
-        """Return the polling interval for the camera."""
-        return 1.0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -115,11 +114,10 @@ class DreameCloudMapCamera(DreameCloudEntity, Camera):
             self._last_frame_id = frame_id
             self._last_opts = opts_key
             self._last_pending = pending
+            self._attr_image_last_updated = datetime.now(UTC)
         self.async_write_ha_state()
 
-    async def async_camera_image(
-        self, width: int | None = None, height: int | None = None
-    ) -> bytes | None:
+    async def async_image(self) -> bytes | None:
         """Return the current map image."""
         return self._image
 

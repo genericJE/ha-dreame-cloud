@@ -938,7 +938,7 @@
     }
     _getMapEntities() {
       if (!this._hass) return [];
-      return Object.keys(this._hass.states).filter((id) => id.startsWith("camera.") && id.includes("map")).map((id) => ({
+      return Object.keys(this._hass.states).filter((id) => id.startsWith("image.") && id.includes("floor_plan")).map((id) => ({
         id,
         name: this._hass.states[id].attributes.friendly_name || id
       })).sort((a, b) => a.name.localeCompare(b.name));
@@ -947,7 +947,7 @@
       const entity = this._config.entity || "";
       if (this._config.map_entity) return this._config.map_entity;
       const base = entity.replace("vacuum.", "").replace(/_vacuum$/, "");
-      return base ? `camera.${base}_map` : "";
+      return base ? `image.${base}_floor_plan` : "";
     }
     _getRooms() {
       if (!this._hass) return {};
@@ -1253,7 +1253,7 @@
       const base = entity.replace("vacuum.", "").replace(/_vacuum$/, "");
       this._entities = {
         vacuum: entity,
-        map: this._config.map_entity || `camera.${base}_map`,
+        map: this._config.map_entity || `image.${base}_floor_plan`,
         battery: `sensor.${base}_battery`,
         cleaning_time: `sensor.${base}_cleaning_time`,
         cleaning_area: `sensor.${base}_cleaning_area`,

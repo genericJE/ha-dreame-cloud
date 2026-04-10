@@ -6,7 +6,7 @@ DOMAIN = "dreame_cloud"
 
 PLATFORMS = [
     Platform.VACUUM,
-    Platform.CAMERA,
+    Platform.IMAGE,
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
     Platform.SWITCH,

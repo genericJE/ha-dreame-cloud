@@ -164,9 +164,9 @@
           themes: { darkMode: false },
         };
 
-        // Fix camera entity_picture to use full URL
+        // Fix image entity_picture to use full URL
         for (const [id, entity] of Object.entries(states)) {
-          if (id.startsWith('camera.') && entity.attributes.entity_picture) {
+          if (id.startsWith('image.') && entity.attributes.entity_picture) {
             const pic = entity.attributes.entity_picture;
             if (pic.startsWith('/')) {
               entity.attributes.entity_picture = `${url}${pic}`;
@@ -196,8 +196,8 @@
         const states = {};
         for (const e of entities) {
           states[e.entity_id] = e;
-          // Fix camera entity_picture
-          if (e.entity_id.startsWith('camera.') && e.attributes.entity_picture) {
+          // Fix image entity_picture
+          if (e.entity_id.startsWith('image.') && e.attributes.entity_picture) {
             const pic = e.attributes.entity_picture;
             if (pic.startsWith('/')) {
               e.attributes.entity_picture = `${url}${pic}`;
@@ -253,11 +253,11 @@
               supported_features: 12604,
             },
           },
-          'camera.x50_ultra_complete_map': {
-            entity_id: 'camera.x50_ultra_complete_map',
+          'image.x50_ultra_complete_floor_plan': {
+            entity_id: 'image.x50_ultra_complete_floor_plan',
             state: 'idle',
             attributes: {
-              friendly_name: 'X50 Ultra Complete Map',
+              friendly_name: 'X50 Ultra Complete Floor Plan',
               entity_picture: generateMockMapDataURL(),
               map_width: 732, map_height: 428,
               scale: 4, rotation: 90, flip_x: false, flip_y: true,

@@ -127,7 +127,7 @@ class DreameVacuumMapCard extends HTMLElement {
     const base = entity.replace("vacuum.", "").replace(/_vacuum$/, "");
     this._entities = {
       vacuum: entity,
-      map: this._config.map_entity || `camera.${base}_map`,
+      map: this._config.map_entity || `image.${base}_floor_plan`,
       battery: `sensor.${base}_battery`,
       cleaning_time: `sensor.${base}_cleaning_time`,
       cleaning_area: `sensor.${base}_cleaning_area`,

@@ -340,7 +340,7 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         except DreameError:
             _LOGGER.exception("Failed to update map")
             return
-        # Cache the sent zone data so camera.py uses it instead of
+        # Cache the sent zone data so image.py uses it instead of
         # stale rism data until the cloud updates the saved map blob.
         self.coordinator.set_pending_zone_update(update)
         # Force next refresh to re-fetch map data (bypass idle throttle)
