@@ -10,13 +10,15 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+if TYPE_CHECKING:
+    from . import DreameCloudConfigEntry
 
 from dreame_mocker.client import (
     AuthenticationError,
@@ -48,10 +50,12 @@ class DreameCloudData:
 class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     """Coordinate data updates from Dreame cloud."""
 
+    config_entry: DreameCloudConfigEntry
+
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry[DreameCloudData],
+        entry: DreameCloudConfigEntry,
         username: str,
         password: str,
         region: str,
@@ -375,7 +379,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
 
     async def _async_fast_map_tick(self, _now: datetime) -> None:
         """Fetch the map and push fresh data to listeners."""
-        if self.data is None or self._device is None:
+        if self._device is None:
             return
         try:
             async with asyncio.timeout(15):
