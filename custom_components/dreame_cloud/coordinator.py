@@ -122,7 +122,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     @property
     def _cache_path(self) -> Path:
         """Return the path for the map cache file."""
-        return Path(self.hass.config.path(f".storage/dreame_cloud_map_cache.json"))
+        return Path(self.hass.config.path(".storage/dreame_cloud_map_cache.json"))
 
     async def async_load_map_cache(self) -> None:
         """Load the cached map and device info from disk (called before first refresh)."""
@@ -322,17 +322,18 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 dnd_enabled=dnd_enabled,
                 volume=volume,
             )
-            self._last_good_data = data
-            return data
         except AuthenticationError as err:
             self._connected = False
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             self._connected = False
             if self._last_good_data is not None:
                 _LOGGER.debug("Update failed, returning cached data: %s", err)
                 return self._last_good_data
             raise UpdateFailed(f"Update failed: {err}") from err
+        else:
+            self._last_good_data = data
+            return data
 
     @property
     def pending_zone_update(self) -> dict[str, Any] | None:
