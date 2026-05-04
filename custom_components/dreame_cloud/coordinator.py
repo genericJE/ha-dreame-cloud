@@ -31,7 +31,12 @@ from dreame_mocker.client import (
 )
 from dreame_mocker.const import STATES, DeviceState, Property
 
-from .const import DEFAULT_PORT, DEFAULT_SCAN_INTERVAL, MAP_FAST_POLL_INTERVAL_CLEANING
+from .const import (
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    MAP_FAST_POLL_INTERVAL_CLEANING,
+    OFFLINE_THRESHOLD_SECONDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,6 +88,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         self._connected = False
         self._pending_zone_update: dict[str, Any] | None = None
         self._last_good_data: DreameCloudData | None = None
+        self._last_successful_update: float = 0.0
         self._cached_device_model: str | None = None
         self._cached_device_name: str | None = None
         self._cached_device_id: str | None = None
@@ -201,6 +207,44 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         except OSError:
             _LOGGER.warning("Failed to write map cache to %s", self._cache_path)
 
+    def _build_offline_data(self) -> DreameCloudData:
+        """Synthesize a DreameCloudData payload for an unreachable device.
+
+        Volatile fields (battery, cleaning time/area) are zeroed because they
+        cannot be trusted while the device is offline. Map and consumables
+        survive — they don't change while the device is offline, and the user
+        wants the map to keep rendering even if status is unknown.
+        """
+        consumables: dict[str, int] = {}
+        dnd_enabled = False
+        volume = 50
+        if self._last_good_data is not None:
+            consumables = dict(self._last_good_data.consumables)
+            dnd_enabled = self._last_good_data.dnd_enabled
+            volume = self._last_good_data.volume
+        return DreameCloudData(
+            status=DeviceStatus(
+                state=0, state_name="Offline", battery=0, error=0,
+                suction_level=0, water_volume=0, cleaning_mode=0,
+                cleaning_time=0, cleaning_area=0,
+            ),
+            map_data=self._map_data,
+            consumables=consumables,
+            dnd_enabled=dnd_enabled,
+            volume=volume,
+        )
+
+    def _should_surface_offline(self) -> bool:
+        """Return True once the device has been unreachable past the threshold."""
+        if self._last_successful_update == 0.0:
+            # Never had a successful update this session — surface Offline
+            # immediately rather than masking with stale cache data.
+            return True
+        return (
+            time.monotonic() - self._last_successful_update
+            > OFFLINE_THRESHOLD_SECONDS
+        )
+
     async def _async_setup(self) -> None:
         """Set up the coordinator — connect and find the device."""
         try:
@@ -224,19 +268,17 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             except ConfigEntryAuthFailed:
                 raise
             except UpdateFailed:
-                if self._last_good_data is not None:
-                    _LOGGER.debug("Connection failed, returning cached data")
-                    return self._last_good_data
-                if self._map_data is not None:
-                    _LOGGER.debug("Connection failed, returning cached map only")
-                    return DreameCloudData(
-                        status=DeviceStatus(
-                            state=0, state_name="Offline", battery=0, error=0,
-                            suction_level=0, water_volume=0, cleaning_mode=0,
-                            cleaning_time=0, cleaning_area=0,
-                        ),
-                        map_data=self._map_data,
+                if self._should_surface_offline():
+                    _LOGGER.debug(
+                        "Reconnect failed past threshold; surfacing Offline"
                     )
+                    return self._build_offline_data()
+                if self._last_good_data is not None:
+                    _LOGGER.debug(
+                        "Reconnect failed; returning cached data (within "
+                        "blip-tolerance window)"
+                    )
+                    return self._last_good_data
                 raise
 
         try:
@@ -331,12 +373,22 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
         except Exception as err:
             self._connected = False
+            if self._should_surface_offline():
+                _LOGGER.debug(
+                    "Update failed past threshold; surfacing Offline: %s", err,
+                )
+                return self._build_offline_data()
             if self._last_good_data is not None:
-                _LOGGER.debug("Update failed, returning cached data: %s", err)
+                _LOGGER.debug(
+                    "Update failed; returning cached data (within "
+                    "blip-tolerance window): %s",
+                    err,
+                )
                 return self._last_good_data
             raise UpdateFailed(f"Update failed: {err}") from err
         else:
             self._last_good_data = data
+            self._last_successful_update = time.monotonic()
             return data
 
     @property

@@ -25,6 +25,10 @@ DEFAULT_REGION = "eu"
 DEFAULT_PORT = 13267
 DEFAULT_SCAN_INTERVAL = 30  # seconds
 MAP_FAST_POLL_INTERVAL_CLEANING = 2  # seconds — fast map poll while cleaning
+# How long the device may be unreachable before the coordinator surfaces an
+# Offline status. Below this we keep returning the last good payload so a
+# brief network blip doesn't briefly knock the entities offline.
+OFFLINE_THRESHOLD_SECONDS = 90
 
 # Fan speed names
 FAN_SPEED_QUIET = "Quiet"

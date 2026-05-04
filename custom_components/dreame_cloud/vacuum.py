@@ -269,19 +269,28 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         cleaning_mode: int = 2,
         **kwargs: Any,
     ) -> None:
-        """Clean specific room segments."""
+        """Clean specific room segments.
+
+        Wire format (from Tasshack/dreame-vacuum):
+          action (siid=4, aiid=1) with two piids:
+            piid 1 (STATUS) = 18 (SEGMENT_CLEANING status code)
+            piid 10 (CLEANING_PROPERTIES) = json({"selects": [[seg, repeat, suction, water, 1]]})
+        """
         if not segments:
             return
 
         selects = [
-            [seg, suction_level, water_volume, repeat, cleaning_mode]
+            [seg, max(1, repeat), suction_level, water_volume, 1]
             for seg in segments
         ]
-        value = json.dumps({"selects": selects})
+        value = json.dumps({"selects": selects}, separators=(",", ":"))
 
         try:
             await self.coordinator.device.send_action(
-                4, 1, params=[{"piid": 1, "value": value}]
+                4, 1, params=[
+                    {"piid": 1, "value": 18},
+                    {"piid": 10, "value": value},
+                ],
             )
         except DreameError:
             _LOGGER.exception("Failed to start segment cleaning")
@@ -356,20 +365,28 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         cleaning_mode: int = 2,
         **kwargs: Any,
     ) -> None:
-        """Clean specific zones by coordinates."""
+        """Clean specific zones by coordinates.
+
+        Wire format (from Tasshack/dreame-vacuum):
+          action (siid=4, aiid=1) with two piids:
+            piid 1 (STATUS) = 19 (ZONE_CLEANING status code)
+            piid 10 (CLEANING_PROPERTIES) = json({"areas": [[x1,y1,x2,y2,repeat,suction,water]]})
+        """
         if not zones:
             return
 
-        value = json.dumps({
-            "areas": [
-                [*zone, suction_level, water_volume, repeat, cleaning_mode]
-                for zone in zones
-            ],
-        })
+        areas = [
+            [*zone, max(1, repeat), suction_level, water_volume]
+            for zone in zones
+        ]
+        value = json.dumps({"areas": areas}, separators=(",", ":"))
 
         try:
             await self.coordinator.device.send_action(
-                4, 1, params=[{"piid": 1, "value": value}]
+                4, 1, params=[
+                    {"piid": 1, "value": 19},
+                    {"piid": 10, "value": value},
+                ],
             )
         except DreameError:
             _LOGGER.exception("Failed to start zone cleaning")

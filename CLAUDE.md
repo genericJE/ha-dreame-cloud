@@ -25,15 +25,45 @@ Two independent loops feed the image entity:
 
 When the robot is dormant, the map sits at its last value with no background fetches. Room renames or zone edits made via the Dreame app while docked will not appear in HA until the next cleaning cycle starts.
 
-## Offline map cache
+## Offline map cache and unreachability handling
 
 The coordinator persists map data and device info to `.storage/dreame_cloud_map_cache.json` on every successful map fetch. This enables the integration to display the last known map when the robot is offline.
 
 - **Cache format**: JSON with `header` (MapHeader fields), `pixels` (base64), `rooms`, `metadata` (raw map JSON), and `device` (model, name, did)
-- **Startup**: `async_load_map_cache()` is called before the first coordinator refresh. If the cloud is unreachable but a cache exists, the coordinator returns an "Offline" status with the cached map instead of raising `UpdateFailed`
-- **Mid-session disconnect**: If property fetches fail after a successful connection, the coordinator returns `_last_good_data` (in-memory) rather than marking entities unavailable
-- **Auth errors are not cached**: `ConfigEntryAuthFailed` always propagates (bad credentials should not be silently ignored)
-- **First-ever setup**: Still requires a live connection to discover the device. The cache only helps on subsequent startups
+- **Startup**: `async_load_map_cache()` is called before the first coordinator refresh. If the cloud is unreachable but a cache exists, the coordinator returns an `Offline` status with the cached map instead of raising `UpdateFailed`
+- **Mid-session disconnect (time-bounded)**: When `_async_update_data` fails, the coordinator checks `time.monotonic() - _last_successful_update`. If the gap is **<= `OFFLINE_THRESHOLD_SECONDS`** (90s), it returns `_last_good_data` to ride out brief network blips. Past the threshold, it synthesizes an `Offline` status payload via `_build_offline_data()` (state="Offline", battery/time/area zeroed, map and consumables preserved).
+- **Why not `unavailable`?** The HA standard would be to raise `UpdateFailed` and let entities flip to `unavailable`. We deliberately surface a synthetic `Offline` state instead because (a) the map should keep rendering even when the device is unreachable — a frozen map is more useful than a blank camera, and (b) automations that need to detect "device just went offline" can write `to: Offline` triggers (e.g. as a fallback when a Wi‑Fi-cycled setup never sees `Drying`).
+- **Reconnection**: After a failure, `_connected = False` so the next poll cycle re-runs `_async_setup()`. Auth is locally cached when the token is valid, so the typical cost is one `device_list` RPC per 30s while the device is offline.
+- **Auth errors are not cached**: `ConfigEntryAuthFailed` always propagates (bad credentials should not be silently ignored).
+- **First-ever setup**: Still requires a live connection to discover the device. The cache only helps on subsequent startups.
+
+## States in practice (X50 Ultra Complete)
+
+`dreame_mocker.const.STATES` lists 13 firmware-level state values. **All non-error states emit through the cloud — provided Wi‑Fi is held on through the cycle.** They go missing only when the device's Wi‑Fi gets cut between phases (either by the X50's own dock-disconnect behavior, or by a user automation that toggles a Wi‑Fi network off when the robot finishes). Verified by holding SusLAN forced on through a manual end-to-end cycle on a real X50 Ultra Complete (`dreame.vacuum.r2532h`, US account, 2026-05-04):
+
+**Empirically observed full cycle (Wi‑Fi forced on, sweep mode):**
+
+```
+Charge Complete > Washing > Sweep+Mop > Returning > Charging > Washing > Drying
+```
+
+| State | Emits via cloud? | Notes |
+|---|---|---|
+| `Charge Complete` (13) | yes | Resting state at the dock between cycles. |
+| `Washing` (9) | yes | Pre-clean and post-return mop self-wash. |
+| `Sweep+Mop` (12), `Sweeping` (1), `Mopping` (7) | yes | Active cleaning. Which one depends on `cleaning_mode`. |
+| `Returning` (5) | yes (Wi‑Fi-on) | Robot heading back to the dock. |
+| `Charging` (6) | yes (Wi‑Fi-on) | On dock, battery topping up. |
+| `Drying` (8) | yes (Wi‑Fi-on) | Mop pad drying. Long phase (~hours). |
+| `Mop Washing` (20), `Mop Washing Paused` (21) | yes | Mop pad self-wash variants (older firmware? — observed on this device). |
+| `Idle` (2), `Paused` (3), `Error` (4) | yes (presumed) | Reachable but uncommon during the test window. |
+
+**Why production histories rarely show `Returning`/`Charging`/`Drying`:** typical setups (including this user's) run a Wi‑Fi-off automation that drops the SusLAN/SSID once the robot is "done", and/or rely on the X50's own behavior of dropping Wi‑Fi when docked. Either way, the device goes silent before the post-return phases emit. The cloud poll then sees `Sweep+Mop` and the next change is `Offline` — not because the firmware never went through `Returning > Charging > Drying`, but because we weren't listening.
+
+**Automation guidance:**
+- **End-of-active-cleaning** (e.g. "robot finished, turn off Wi‑Fi"): trigger on `to: Drying`. This is the most accurate signal — the active cleaning is over and the long, idle drying phase has begun. Pair with a small delay (e.g. 2 minutes) if you want to give the device time to settle.
+- **Wi‑Fi-cycled setups where SusLAN is already off by the time `Drying` would fire**: fall back to `from: [Sweep+Mop, Sweeping, Mopping]` `to: Offline`, which the coordinator emits after the 90s threshold. This is a workaround for the case where you've already cut Wi‑Fi, not the canonical signal.
+- **Wash cycle complete**: watch transitions out of `Mop Washing` / `Washing`.
 
 ## Pixel encoding
 

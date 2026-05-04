@@ -401,6 +401,35 @@ class DreameVacuumMapCard extends HTMLElement {
     // Build SVG content
     let svgContent = "";
 
+    // Robot's cleaning path (drawn first so everything else sits on top).
+    // `camera.attributes.path` is { type: [segment, ...] } where each
+    // segment is a list of {x, y} image-coord points. Types are emitted
+    // by the cleaning mode markers in the source data: sweep, mop,
+    // sweep_and_mop. L (line continuation) points inherit the type of
+    // the most recent marker.
+    const pathData = camera.attributes.path;
+    if (pathData) {
+      const pathStyles = {
+        sweep:         { stroke: "rgba(80,180,255,0.9)",  width: 1.5 },
+        mop:           { stroke: "rgba(120,210,255,0.9)", width: 1.5 },
+        sweep_and_mop: { stroke: "rgba(100,200,255,0.9)", width: 1.5 },
+      };
+      for (const [ptype, style] of Object.entries(pathStyles)) {
+        const segments = pathData[ptype] || [];
+        for (const segment of segments) {
+          if (segment.length < 2) continue;
+          const d = segment
+            .map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`)
+            .join(" ");
+          svgContent += `
+            <path d="${d}" fill="none"
+              stroke="${style.stroke}" stroke-width="${style.width}"
+              stroke-linecap="round" stroke-linejoin="round" />
+          `;
+        }
+      }
+    }
+
     // Room overlays (only in room mode)
     const rooms = camera.attributes.rooms || {};
     const hiddenRooms = this._config.hidden_rooms || [];

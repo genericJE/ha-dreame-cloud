@@ -1488,6 +1488,26 @@
       const mapHeight = camera.attributes.map_height || 600;
       mapOverlay.setAttribute("viewBox", `0 0 ${mapWidth} ${mapHeight}`);
       let svgContent = "";
+      const pathData = camera.attributes.path;
+      if (pathData) {
+        const pathStyles = {
+          sweep: { stroke: "rgba(80,180,255,0.9)", width: 1.5 },
+          mop: { stroke: "rgba(120,210,255,0.9)", width: 1.5 },
+          sweep_and_mop: { stroke: "rgba(100,200,255,0.9)", width: 1.5 }
+        };
+        for (const [ptype, style] of Object.entries(pathStyles)) {
+          const segments = pathData[ptype] || [];
+          for (const segment of segments) {
+            if (segment.length < 2) continue;
+            const d = segment.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+            svgContent += `
+            <path d="${d}" fill="none"
+              stroke="${style.stroke}" stroke-width="${style.width}"
+              stroke-linecap="round" stroke-linejoin="round" />
+          `;
+          }
+        }
+      }
       const rooms = camera.attributes.rooms || {};
       const hiddenRooms = this._config.hidden_rooms || [];
       if (this._mode === "room") {

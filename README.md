@@ -30,6 +30,26 @@ Built for the **Dreame X50 Ultra Complete**, but should work with other Dreame c
 - Device state (human-readable)
 - Consumable life: main brush, side brush, filter, mop pad (disabled by default)
 
+#### State sensor values in practice
+
+All 13 firmware-level state codes (`Sweeping`, `Idle`, `Paused`, `Error`, `Returning`, `Charging`, `Mopping`, `Drying`, `Washing`, `Sweep+Mop`, `Charge Complete`, `Mop Washing`, `Mop Washing Paused`) emit through the cloud and reach HA — provided the device's Wi‑Fi is on while the state is active. On a real X50 Ultra Complete with Wi‑Fi held on through the whole cycle the observed sequence is:
+
+```
+Charge Complete > Washing > Sweep+Mop > Returning > Charging > Washing > Drying
+```
+
+Plus `Offline` — a synthetic state the coordinator emits when the device has been unreachable for >90 seconds (see below). It does **not** mean the firmware reported anything — it's a stand-in for "we lost the device."
+
+If your production history shows `Sweep+Mop > Offline` with no intermediate states, it's because Wi‑Fi was cut between phases — either by the X50's own dock-disconnect, or by a user automation that turns off Wi‑Fi when the robot is "done." With Wi‑Fi held on, every phase is observable.
+
+The cleanest "robot finished active cleaning" trigger is `to: Drying`. If your setup has already cut Wi‑Fi by then, `from: [Sweep+Mop, Sweeping, Mopping]` `to: Offline` is the fallback, but it's a workaround — `to: Drying` is the real signal.
+
+### Offline detection
+
+When the device is unreachable, the coordinator transitions the state sensor to `Offline` and zeroes the volatile fields (battery, cleaning time, cleaning area). The map and consumable sensors keep their last known values — the map doesn't change while the device is offline, and a frozen map is more useful in the dashboard than an unavailable camera entity.
+
+A 90-second tolerance window absorbs brief network blips before flipping to `Offline`. Configurable via `OFFLINE_THRESHOLD_SECONDS` in `const.py`.
+
 ### Controls
 - **Selects**: Water volume, cleaning mode, map rotation
 - **Switches**: Do Not Disturb, map flip horizontal, map flip vertical

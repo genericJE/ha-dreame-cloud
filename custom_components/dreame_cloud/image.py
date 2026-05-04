@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import logging
+import re
 import struct
 import zlib
 from datetime import UTC, datetime
@@ -698,6 +699,119 @@ def _decode_rism_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         return {}
 
 
+# Dreame path ("tr") format: a string of operator-prefixed coordinate
+# pairs. Each point is `<op><x>,<y>` where op is one letter.
+#
+# Op letters:
+#   - M, S, W: absolute coords; sets the cleaning mode for following
+#     points (Mop, Sweep, sWeep+mop). Each occurrence starts a NEW
+#     cleaning run, so consumers should split segments here.
+#   - L: relative offset from previous point; inherits the cleaning
+#     mode of the most recent S/M/W marker (it's a continuation line
+#     within the same run, not a separate "travel" path).
+#   - l: absolute coords, used in P-frames only to connect across map
+#     frames; carries the current type forward.
+#
+# Capital L is relative, lowercase l is absolute — opposite of standard
+# SVG. Coordinates are in vacuum coords (same mm space as
+# header.left/top). Reference: Tasshack/dreame-vacuum dreame/map.py
+# (DreameMapVacuumMapDecoder + map_renderer path emit logic).
+_PATH_POINT_RE = re.compile(r"(?P<op>[MWSLl])(?P<x>-?\d+),(?P<y>-?\d+)")
+
+# Single source of truth for path-type ordering (consumer loops).
+_PATH_TYPE_NAMES: tuple[str, ...] = ("sweep", "mop", "sweep_and_mop")
+_PATH_OP_TO_TYPE: dict[str, str] = {
+    "S": "sweep",
+    "M": "mop",
+    "W": "sweep_and_mop",
+}
+
+
+def _parse_path_string(tr: str) -> list[tuple[str, str, int, int]]:
+    """Parse the ``tr`` path string into ``(op, type, x, y)`` points.
+
+    The input is a concatenated string of ``<op><x>,<y>`` tokens. Returns
+    one tuple per point in traversal order with absolute coords. The raw
+    ``op`` is preserved so callers can tell ``S``/``M``/``W`` markers
+    (each starts a new cleaning run) apart from ``L`` continuations
+    inside the current run.
+
+    ``L`` ops carry relative offsets; everything else is absolute.
+    Cleaning type is inherited from the most recent ``S``/``M``/``W``.
+    """
+    points: list[tuple[str, str, int, int]] = []
+    cur_x, cur_y = 0, 0
+    cur_type = "sweep"  # default if path starts mid-stream without marker
+    for m in _PATH_POINT_RE.finditer(tr):
+        op = m.group("op")
+        x = int(m.group("x"))
+        y = int(m.group("y"))
+        if op == "L":
+            cur_x += x
+            cur_y += y
+        elif op == "l":
+            cur_x, cur_y = x, y
+        else:
+            cur_x, cur_y = x, y
+            cur_type = _PATH_OP_TO_TYPE[op]
+        points.append((op, cur_type, cur_x, cur_y))
+    return points
+
+
+def _transform_path(
+    metadata: dict[str, Any],
+    header: MapHeader,
+    w: int,
+    h: int,
+    flip_x: bool,
+    flip_y: bool,
+    rotation: int,
+    scale: int,
+) -> dict[str, list[list[dict[str, int]]]]:
+    """Transform the ``tr`` path to image coords, grouped by type.
+
+    Returns a dict of ``{type: [segment, ...]}`` where each segment is a
+    list of ``{x, y}`` image-coord points. A new segment starts whenever
+    the path type changes, so consumers can draw each type with its own
+    style (e.g. dashed travel vs. solid cleaning) without mixing them.
+    """
+    tr = metadata.get("tr")
+    result: dict[str, list[list[dict[str, int]]]] = {
+        name: [] for name in _PATH_TYPE_NAMES
+    }
+    if not isinstance(tr, str) or not tr:
+        return result
+
+    points = _parse_path_string(tr)
+    if not points:
+        return result
+
+    # Each S/M/W marker starts a NEW cleaning run; subsequent L points
+    # extend the current run. We render runs as separate polylines so
+    # the gap between them isn't drawn as a fake "travel" line across
+    # the map. (This matches Tasshack's renderer.)
+    current_type: str | None = None
+    current_segment: list[dict[str, int]] = []
+    for op, ptype, vx, vy in points:
+        ix, iy = _vacuum_to_image(
+            vx, vy, header, w, h, flip_x, flip_y, rotation, scale,
+        )
+        point = {"x": ix, "y": iy}
+        # A non-L op (S/M/W/l) starts a new run. L extends the current.
+        if op != "L":
+            if current_segment and current_type is not None:
+                result[current_type].append(current_segment)
+            current_type = ptype
+            current_segment = [point]
+        else:
+            current_segment.append(point)
+
+    if current_segment and current_type is not None:
+        result[current_type].append(current_segment)
+
+    return result
+
+
 def _render_map(
     map_data: DreameMap,
     rotation: int = 0,
@@ -883,5 +997,10 @@ def _render_map(
     attrs["cliffs"] = _transform_threshold_lines(
         {"cliff": vw.get("cliff", [])}, "cliff", *transform_args,
     )
+
+    # Path trail ("tr") — the robot's cleaning history. Uses raw_metadata
+    # (not effective_meta) because tr only appears in live frames, and
+    # the pending overlay never sets it.
+    attrs["path"] = _transform_path(map_data.raw_metadata, *transform_args)
 
     return buf.getvalue(), attrs
