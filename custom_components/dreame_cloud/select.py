@@ -13,7 +13,10 @@ from .const import (
     CLEANING_MODES,
     CONF_MAP_ROTATION,
     INT_TO_CLEANING_MODE,
+    INT_TO_MOP_WASH_LEVEL,
     INT_TO_WATER_VOLUME,
+    MOP_WASH_LEVEL_TO_INT,
+    MOP_WASH_LEVELS,
     WATER_VOLUME_TO_INT,
     WATER_VOLUMES,
 )
@@ -33,6 +36,7 @@ async def async_setup_entry(
     async_add_entities([
         DreameCloudWaterVolumeSelect(coordinator),
         DreameCloudCleaningModeSelect(coordinator),
+        DreameCloudMopWashLevelSelect(coordinator),
         DreameCloudMapRotationSelect(coordinator),
     ])
 
@@ -93,6 +97,31 @@ class DreameCloudCleaningModeSelect(DreameCloudEntity, SelectEntity):
             raw = self.coordinator.data.status.cleaning_mode
             new_value = (raw & ~0xFF) | CLEANING_MODE_TO_INT[option]
             await self.coordinator.device.set_cleaning_mode(new_value)
+            await self.coordinator.async_request_refresh()
+
+
+class DreameCloudMopWashLevelSelect(DreameCloudEntity, SelectEntity):
+    """Select entity for mop wash intensity."""
+
+    _attr_icon = "mdi:water-percent"
+    _attr_translation_key = "mop_wash_level"
+    _attr_options = MOP_WASH_LEVELS
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameCloudCoordinator) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.device_id}_mop_wash_level"
+
+    @property
+    def current_option(self) -> str | None:
+        return INT_TO_MOP_WASH_LEVEL.get(self.coordinator.data.mop_wash_level)
+
+    async def async_select_option(self, option: str) -> None:
+        if option in MOP_WASH_LEVEL_TO_INT:
+            await self.coordinator.device.set_mop_wash_level(
+                MOP_WASH_LEVEL_TO_INT[option]
+            )
             await self.coordinator.async_request_refresh()
 
 

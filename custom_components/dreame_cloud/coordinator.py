@@ -50,6 +50,14 @@ class DreameCloudData:
     consumables: dict[str, int] = field(default_factory=lambda: {})  # noqa: PIE807
     dnd_enabled: bool = False
     volume: int = 50
+    # SIID 4 wash / mop preferences
+    self_clean: bool = True
+    auto_water_refilling: bool = True
+    auto_mount_mop: bool = True
+    intelligent_recognition: bool = True
+    mop_wash_level: int = 1
+    mop_in_station: bool = True
+    mop_pad_installed: bool = True
 
 
 class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
@@ -218,10 +226,21 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         consumables: dict[str, int] = {}
         dnd_enabled = False
         volume = 50
+        prefs: dict[str, Any] = {
+            "self_clean": True,
+            "auto_water_refilling": True,
+            "auto_mount_mop": True,
+            "intelligent_recognition": True,
+            "mop_wash_level": 1,
+            "mop_in_station": True,
+            "mop_pad_installed": True,
+        }
         if self._last_good_data is not None:
             consumables = dict(self._last_good_data.consumables)
             dnd_enabled = self._last_good_data.dnd_enabled
             volume = self._last_good_data.volume
+            for k in prefs:
+                prefs[k] = getattr(self._last_good_data, k)
         return DreameCloudData(
             status=DeviceStatus(
                 state=0, state_name="Offline", battery=0, error=0,
@@ -232,6 +251,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             consumables=consumables,
             dnd_enabled=dnd_enabled,
             volume=volume,
+            **prefs,
         )
 
     def _should_surface_offline(self) -> bool:
@@ -298,6 +318,13 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 Property.MOP_PAD_LIFE_LEVEL,
                 Property.DND_ENABLED,
                 Property.VOLUME,
+                Property.SELF_CLEAN,
+                Property.AUTO_WATER_REFILLING,
+                Property.AUTO_MOUNT_MOP,
+                Property.INTELLIGENT_RECOGNITION,
+                Property.MOP_WASH_LEVEL,
+                Property.MOP_IN_STATION,
+                Property.MOP_PAD_INSTALLED,
             ])
 
             # Index results by (siid, piid) for easy lookup.
@@ -333,6 +360,20 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             dnd_enabled = bool(values.get(Property.DND_ENABLED, False))
             volume = int(values.get(Property.VOLUME, 50))
 
+            self_clean = bool(values.get(Property.SELF_CLEAN, 1))
+            auto_water_refilling = bool(
+                values.get(Property.AUTO_WATER_REFILLING, 1),
+            )
+            auto_mount_mop = bool(values.get(Property.AUTO_MOUNT_MOP, 1))
+            intelligent_recognition = bool(
+                values.get(Property.INTELLIGENT_RECOGNITION, 1),
+            )
+            mop_wash_level = int(values.get(Property.MOP_WASH_LEVEL, 1))
+            mop_in_station = bool(values.get(Property.MOP_IN_STATION, False))
+            mop_pad_installed = bool(
+                values.get(Property.MOP_PAD_INSTALLED, False),
+            )
+
             is_cleaning = status.state in (
                 DeviceState.SWEEPING,
                 DeviceState.MOPPING,
@@ -367,6 +408,13 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 consumables=consumables,
                 dnd_enabled=dnd_enabled,
                 volume=volume,
+                self_clean=self_clean,
+                auto_water_refilling=auto_water_refilling,
+                auto_mount_mop=auto_mount_mop,
+                intelligent_recognition=intelligent_recognition,
+                mop_wash_level=mop_wash_level,
+                mop_in_station=mop_in_station,
+                mop_pad_installed=mop_pad_installed,
             )
         except AuthenticationError as err:
             self._connected = False
@@ -449,6 +497,13 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 consumables=self.data.consumables,
                 dnd_enabled=self.data.dnd_enabled,
                 volume=self.data.volume,
+                self_clean=self.data.self_clean,
+                auto_water_refilling=self.data.auto_water_refilling,
+                auto_mount_mop=self.data.auto_mount_mop,
+                intelligent_recognition=self.data.intelligent_recognition,
+                mop_wash_level=self.data.mop_wash_level,
+                mop_in_station=self.data.mop_in_station,
+                mop_pad_installed=self.data.mop_pad_installed,
             )
         )
 

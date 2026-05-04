@@ -77,6 +77,27 @@ WATER_VOLUME_TO_INT: dict[str, int] = {
 
 INT_TO_WATER_VOLUME: dict[int, str] = {v: k for k, v in WATER_VOLUME_TO_INT.items()}
 
+# Mop wash level (siid 4 piid 45)
+MOP_WASH_LEVEL_WATER_SAVING = "Water Saving"
+MOP_WASH_LEVEL_DAILY = "Daily"
+MOP_WASH_LEVEL_DEEP = "Deep"
+
+MOP_WASH_LEVELS = [
+    MOP_WASH_LEVEL_WATER_SAVING,
+    MOP_WASH_LEVEL_DAILY,
+    MOP_WASH_LEVEL_DEEP,
+]
+
+MOP_WASH_LEVEL_TO_INT: dict[str, int] = {
+    MOP_WASH_LEVEL_WATER_SAVING: 0,
+    MOP_WASH_LEVEL_DAILY: 1,
+    MOP_WASH_LEVEL_DEEP: 2,
+}
+
+INT_TO_MOP_WASH_LEVEL: dict[int, str] = {
+    v: k for k, v in MOP_WASH_LEVEL_TO_INT.items()
+}
+
 # Room colors for map rendering (RGB)
 ROOM_COLORS: list[tuple[int, int, int]] = [
     (135, 206, 235),

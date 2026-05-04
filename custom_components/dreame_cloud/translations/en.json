@@ -63,6 +63,12 @@
     "binary_sensor": {
       "charging": {
         "name": "Charging"
+      },
+      "mop_in_station": {
+        "name": "Mop Pads at Base"
+      },
+      "mop_pad_installed": {
+        "name": "Mop Pads Installed"
       }
     },
     "switch": {
@@ -74,6 +80,18 @@
       },
       "map_flip_y": {
         "name": "Map Flip Vertical"
+      },
+      "self_clean": {
+        "name": "Self-Clean"
+      },
+      "auto_water_refilling": {
+        "name": "Auto Water Refilling"
+      },
+      "auto_mount_mop": {
+        "name": "Auto Mount Mop"
+      },
+      "intelligent_recognition": {
+        "name": "Intelligent Recognition"
       }
     },
     "button": {
@@ -93,14 +111,14 @@
       }
     },
     "select": {
-      "suction_level": {
-        "name": "Suction Level"
-      },
       "water_volume": {
         "name": "Water Volume"
       },
       "cleaning_mode": {
         "name": "Cleaning Mode"
+      },
+      "mop_wash_level": {
+        "name": "Mop Wash Level"
       },
       "map_rotation": {
         "name": "Map Rotation"

@@ -23,7 +23,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensor entities."""
     coordinator: DreameCloudCoordinator = entry.runtime_data
-    async_add_entities([DreameCloudChargingSensor(coordinator)])
+    async_add_entities([
+        DreameCloudChargingSensor(coordinator),
+        DreameCloudMopInStationSensor(coordinator),
+        DreameCloudMopPadInstalledSensor(coordinator),
+    ])
 
 
 class DreameCloudChargingSensor(DreameCloudEntity, BinarySensorEntity):
@@ -41,3 +45,35 @@ class DreameCloudChargingSensor(DreameCloudEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return true if charging."""
         return self.coordinator.data.status.state == DeviceState.CHARGING
+
+
+class DreameCloudMopInStationSensor(DreameCloudEntity, BinarySensorEntity):
+    """Mop pads detected at the base station (read-only)."""
+
+    _attr_icon = "mdi:tray-full"
+    _attr_translation_key = "mop_in_station"
+
+    def __init__(self, coordinator: DreameCloudCoordinator) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.device_id}_mop_in_station"
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.data.mop_in_station
+
+
+class DreameCloudMopPadInstalledSensor(DreameCloudEntity, BinarySensorEntity):
+    """Mop pads currently mounted on the robot (read-only)."""
+
+    _attr_icon = "mdi:water-circle"
+    _attr_translation_key = "mop_pad_installed"
+
+    def __init__(self, coordinator: DreameCloudCoordinator) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.device_id}_mop_pad_installed"
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.data.mop_pad_installed
