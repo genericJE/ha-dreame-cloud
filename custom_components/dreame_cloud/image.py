@@ -154,20 +154,51 @@ def _compute_room_bboxes(
     rotation: int,
     scale: int,
     rooms: dict[int, Any],
+    live_to_rism: dict[int, int] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Compute room bounding boxes in final image coordinates."""
+    """Compute room bounding boxes in final image coordinates.
+
+    When ``live_to_rism`` is provided and non-empty, live pixel-grid
+    segments are grouped by the rism ID they map to and a single bbox
+    per rism ID is emitted. This is needed on devices (X50 family)
+    where the firmware allocates volatile SLAM-internal IDs in the
+    live grid that bear no relation to the user-facing IDs in the
+    saved map. Without this grouping, one user room can render as
+    multiple disjoint rectangles, and the IDs sent back via
+    ``clean_segment`` won't match what the device's cleanset expects.
+
+    When ``live_to_rism`` is empty, falls back to one bbox per live
+    segment (the legacy behavior, correct when seg_inf is in the live
+    frame).
+    """
     room_ids = pixel_array & 0x3F
     is_wall = (pixel_array & 0x80).astype(bool)
 
+    # Decide which IDs to emit and how to group live pixels.
+    use_rism = bool(live_to_rism)
+    if use_rism:
+        # Group: rism_id -> list of live_ids that map to it.
+        groups: dict[int, list[int]] = {}
+        for live_id, rism_id in live_to_rism.items():
+            groups.setdefault(rism_id, []).append(live_id)
+        emit_ids: list[int] = sorted(groups.keys())
+    else:
+        # Legacy: one entry per live ID present in the pixel grid.
+        emit_ids = list(range(1, 64))
+        groups = {sid: [sid] for sid in emit_ids}
+
+    valid_ids = set(rooms.keys()) if rooms and not use_rism else None
+
     result: dict[str, dict[str, Any]] = {}
-    # Only emit rooms that appear in the map metadata (seg_inf).
-    # Pixel data can contain stale segment IDs from earlier map versions;
-    # the metadata dict is the canonical set of active rooms.
-    valid_ids = set(rooms.keys()) if rooms else None
-    for seg_id in range(1, 64):
+    for seg_id in emit_ids:
         if valid_ids is not None and seg_id not in valid_ids:
             continue
-        mask = (room_ids == seg_id) & ~is_wall
+        # Union mask over all live IDs in this group.
+        group_live_ids = groups[seg_id]
+        mask = np.zeros_like(is_wall)
+        for live_id in group_live_ids:
+            mask |= room_ids == live_id
+        mask &= ~is_wall
         if not mask.any():
             continue
 
@@ -903,9 +934,16 @@ def _render_map(
     buf = io.BytesIO()
     img.save(buf, format="PNG")
 
-    # Compute metadata attributes for the frontend card
+    # Compute metadata attributes for the frontend card.
+    # The X50 firmware allocates volatile SLAM-internal segment IDs in
+    # the live pixel grid that don't match the user-facing IDs the
+    # device's cleanset/clean_segment expect — translate via the rism
+    # saved-map mapping when dreame-mocker exposes it (>=v0.1.2).
+    mapper = getattr(map_data, "live_to_rism_segment_map", None)
+    live_to_rism = mapper() if callable(mapper) else {}
     room_bboxes = _compute_room_bboxes(
-        pixel_array, w, h, flip_x, flip_y, rotation, scale, map_data.rooms
+        pixel_array, w, h, flip_x, flip_y, rotation, scale,
+        map_data.rooms, live_to_rism,
     )
 
     attrs: dict[str, Any] = {

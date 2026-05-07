@@ -458,6 +458,28 @@ class DreameVacuumMapCard extends HTMLElement {
             </text>
           ` : "";
 
+        // Segment ID pill — top-right of each room. Always shown in
+        // Room mode so the user can see which numeric IDs to pass to
+        // clean_segment / which to alias. Top-right keeps it clear of
+        // the order-of-clean badge (top-center) and the room name
+        // (centered).
+        const idText = `#${segId}`;
+        const idPad = 4;
+        const idFontSize = Math.min(room.w, room.h) > 80 ? 12 : 10;
+        const idCharW = idFontSize * 0.62;
+        const idPillW = Math.max(20, Math.round(idText.length * idCharW + idPad * 2));
+        const idPillH = idFontSize + idPad * 2;
+        const idPillX = room.x + room.w - idPillW - 4;
+        const idPillY = room.y + 4;
+        const idLabel = `
+            <rect x="${idPillX}" y="${idPillY}" width="${idPillW}" height="${idPillH}"
+              fill="rgba(0,0,0,0.55)" stroke="rgb(${r},${g},${b})" stroke-width="1"
+              rx="4" ry="4" />
+            <text x="${idPillX + idPillW / 2}" y="${idPillY + idPillH / 2 + 0.5}"
+              text-anchor="middle" dominant-baseline="middle"
+              fill="white" font-size="${idFontSize}" font-weight="700"
+              font-family="system-ui, sans-serif">${idText}</text>`;
+
         svgContent += `
           <g class="room-overlay" data-seg-id="${segId}" style="cursor:pointer">
             <rect x="${room.x}" y="${room.y}" width="${room.w}" height="${room.h}"
@@ -471,12 +493,7 @@ class DreameVacuumMapCard extends HTMLElement {
               paint-order="stroke" stroke="rgba(0,0,0,0.6)" stroke-width="3">
               ${this._getRoomName(segId, room)}
             </text>
-            <text x="${room.x + 6}" y="${room.y + 12}"
-              fill="rgba(255,255,255,0.5)" font-size="9"
-              font-family="system-ui, sans-serif" font-weight="600"
-              paint-order="stroke" stroke="rgba(0,0,0,0.4)" stroke-width="2">
-              #${segId}
-            </text>
+            ${idLabel}
             ${orderBadge}
           </g>
         `;
