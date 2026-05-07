@@ -904,9 +904,27 @@ def _render_map(
     img = Image.fromarray(img_array, "RGB")
     draw = ImageDraw.Draw(img)
 
+    # The X50 reports sentinel positions (32766/32767) when the device is
+    # idle on the dock — the lidar is asleep so it has no live-localized
+    # position to share. Fall back to the rism saved map's charger coords
+    # (the dock doesn't move) and treat a sentinel robot as "at dock"
+    # rather than rendering nothing.
+    sentinel_threshold = 32000
+    rism = map_data.rism
+    cx_v, cy_v = header.charger_x, header.charger_y
+    if (abs(cx_v) >= sentinel_threshold or abs(cy_v) >= sentinel_threshold) and rism is not None:
+        cx_v, cy_v = rism.header.charger_x, rism.header.charger_y
+
+    rx_v, ry_v, robot_angle_raw = header.robot_x, header.robot_y, header.robot_angle
+    if abs(rx_v) >= sentinel_threshold or abs(ry_v) >= sentinel_threshold:
+        # Robot is at the dock; place it on the charger.
+        rx_v, ry_v = cx_v, cy_v
+        if rism is not None:
+            robot_angle_raw = rism.header.charger_angle
+
     # Draw charger
     cx, cy = _vacuum_to_image(
-        header.charger_x, header.charger_y, header, w, h, flip_x, flip_y, rotation, 1
+        cx_v, cy_v, header, w, h, flip_x, flip_y, rotation, 1
     )
     if 0 <= cx < w_out and 0 <= cy < h_out:
         r = max(3, min(w_out, h_out) // 60)
@@ -914,12 +932,12 @@ def _render_map(
 
     # Robot position (for frontend overlay, not drawn on PNG)
     rx, ry = _vacuum_to_image(
-        header.robot_x, header.robot_y, header, w, h, flip_x, flip_y, rotation, 1
+        rx_v, ry_v, header, w, h, flip_x, flip_y, rotation, 1
     )
 
     # Transform robot angle through the same flip/rotation pipeline.
     # Vacuum angle: 0 = east, CCW positive (standard math convention).
-    robot_angle = header.robot_angle
+    robot_angle = robot_angle_raw
     if flip_x:
         robot_angle = 180 - robot_angle
     if flip_y:

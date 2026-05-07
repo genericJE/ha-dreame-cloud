@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import logging
 import time
@@ -28,6 +29,7 @@ from dreame_mocker.client import (
     DreameError,
     DreameMap,
     MapHeader,
+    RoomInfo,
 )
 from dreame_mocker.const import STATES, DeviceState, Property
 
@@ -178,7 +180,22 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         for k, v in raw["header"].items():
             setattr(header, k, v)
         pixels = base64.b64decode(raw["pixels"])
-        rooms: dict[int, Any] = {int(k): v for k, v in raw["rooms"].items()}
+        # rooms may be cached as RoomInfo dicts (post-v0.3.6 format) or as
+        # opaque values (pre-v0.3.6, when seg_inf was always empty here).
+        # Reconstruct RoomInfo when the dict carries the expected keys.
+        rooms: dict[int, Any] = {}
+        for k, v in raw["rooms"].items():
+            seg_id = int(k)
+            if isinstance(v, dict) and "segment_id" in v and "name" in v:
+                rooms[seg_id] = RoomInfo(
+                    segment_id=int(v.get("segment_id", seg_id)),
+                    room_id=int(v.get("room_id", seg_id)),
+                    name=str(v.get("name", "")),
+                    room_type=int(v.get("room_type", -1)),
+                    neighbors=list(v.get("neighbors", [])),
+                )
+            else:
+                rooms[seg_id] = v
         metadata: dict[str, Any] = raw["metadata"]
         m = DreameMap.__new__(DreameMap)
         m.header = header
@@ -192,10 +209,17 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         """Serialize a DreameMap and device info to the JSON cache file."""
         h = map_data.header
         header_dict = {k: v for k, v in vars(h).items() if not k.startswith("_")}
+        # RoomInfo is a dataclass; convert each entry to a dict so json.dumps
+        # works. Pre-rism-fallback (dreame-mocker <0.1.2) this dict was always
+        # empty, so the previous direct json.dumps happened to succeed.
+        rooms_serializable: dict[int, Any] = {
+            k: dataclasses.asdict(v) if isinstance(v, RoomInfo) else v
+            for k, v in map_data.rooms.items()
+        }
         payload: dict[str, Any] = {
             "header": header_dict,
             "pixels": base64.b64encode(map_data.pixels).decode(),
-            "rooms": map_data.rooms,
+            "rooms": rooms_serializable,
             "metadata": map_data.raw_metadata,
         }
         if self._device is not None:
