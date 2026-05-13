@@ -60,6 +60,7 @@ class DreameCloudData:
     mop_wash_level: int = 1
     mop_in_station: bool = True
     mop_pad_installed: bool = True
+    customized_cleaning: bool = False
 
 
 class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
@@ -258,6 +259,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             "mop_wash_level": 1,
             "mop_in_station": True,
             "mop_pad_installed": True,
+            "customized_cleaning": False,
         }
         if self._last_good_data is not None:
             consumables = dict(self._last_good_data.consumables)
@@ -349,6 +351,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 Property.MOP_WASH_LEVEL,
                 Property.MOP_IN_STATION,
                 Property.MOP_PAD_INSTALLED,
+                Property.CUSTOMIZED_CLEANING,
             ])
 
             # Index results by (siid, piid) for easy lookup.
@@ -397,6 +400,9 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             mop_pad_installed = bool(
                 values.get(Property.MOP_PAD_INSTALLED, False),
             )
+            customized_cleaning = bool(
+                values.get(Property.CUSTOMIZED_CLEANING, False),
+            )
 
             is_cleaning = status.state in (
                 DeviceState.SWEEPING,
@@ -439,6 +445,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 mop_wash_level=mop_wash_level,
                 mop_in_station=mop_in_station,
                 mop_pad_installed=mop_pad_installed,
+                customized_cleaning=customized_cleaning,
             )
         except AuthenticationError as err:
             self._connected = False
@@ -528,6 +535,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 mop_wash_level=self.data.mop_wash_level,
                 mop_in_station=self.data.mop_in_station,
                 mop_pad_installed=self.data.mop_pad_installed,
+                customized_cleaning=self.data.customized_cleaning,
             )
         )
 

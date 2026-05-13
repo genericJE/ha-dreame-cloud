@@ -30,6 +30,7 @@ async def async_setup_entry(
         DreameCloudAutoWaterRefillingSwitch(coordinator),
         DreameCloudAutoMountMopSwitch(coordinator),
         DreameCloudIntelligentRecognitionSwitch(coordinator),
+        DreameCloudCustomizedCleaningSwitch(coordinator),
     ])
 
 
@@ -218,4 +219,36 @@ class DreameCloudIntelligentRecognitionSwitch(DreameCloudEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.device.set_intelligent_recognition(False)
+        await self.coordinator.async_request_refresh()
+
+
+class DreameCloudCustomizedCleaningSwitch(DreameCloudEntity, SwitchEntity):
+    """Apply per-room cleanset (mode/suction/water) from the saved map.
+
+    When off, every clean runs in the global cleaning_mode regardless of
+    the per-room preferences set in the Dreame app. Mirrors the app's
+    "Customized cleaning" toggle (siid 4 piid 26).
+    """
+
+    _attr_icon = "mdi:home-edit"
+    _attr_translation_key = "customized_cleaning"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameCloudCoordinator) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{coordinator.device_id}_customized_cleaning"
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.data.customized_cleaning
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.device.set_customized_cleaning(True)
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.device.set_customized_cleaning(False)
         await self.coordinator.async_request_refresh()

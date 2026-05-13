@@ -92,6 +92,9 @@
       },
       "intelligent_recognition": {
         "name": "Intelligent Recognition"
+      },
+      "customized_cleaning": {
+        "name": "Customized Cleaning"
       }
     },
     "button": {
