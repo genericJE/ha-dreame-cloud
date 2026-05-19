@@ -122,3 +122,34 @@ COLOR_WALL = (80, 80, 80)
 COLOR_BACKGROUND = (32, 32, 32)
 COLOR_ROBOT = (255, 60, 60)
 COLOR_CHARGER = (60, 220, 60)
+
+# Dreame room-type → default name. The X50 firmware leaves seg_inf.name
+# empty for rooms the user hasn't named in the app, but keeps the
+# `type` field as a category code. Empirically verified on r2532h:
+# 1=Living Room, 2=Master Bedroom, 4=Kitchen, 6=Bathroom — these match
+# the names the Dreame app shows for unnamed rooms. Other types are
+# from the wider Dreame protocol and best-effort.
+ROOM_TYPE_NAMES: dict[int, str] = {
+    1: "Living Room",
+    2: "Master Bedroom",
+    3: "Bedroom",
+    4: "Kitchen",
+    5: "Study",
+    6: "Bathroom",
+    7: "Dining Room",
+    8: "Balcony",
+    9: "Cloakroom",
+    10: "Laundry Room",
+    11: "Storage Room",
+}
+
+
+def default_room_name(seg_id: int, name: str, room_type: int) -> str:
+    """Resolve a display name for a room from seg_inf data.
+
+    Falls back to the Dreame room-type default (Living Room, Kitchen, …)
+    when the user hasn't named the room in the app, then to "Room {id}".
+    """
+    if name:
+        return name
+    return ROOM_TYPE_NAMES.get(room_type, f"Room {seg_id}")

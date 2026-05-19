@@ -29,6 +29,7 @@ from .const import (
     CONF_MAP_FLIP_Y,
     CONF_MAP_ROTATION,
     ROOM_COLORS,
+    default_room_name,
 )
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
@@ -226,7 +227,11 @@ def _compute_room_bboxes(
         bh = max(tys) - by
 
         room_info = rooms.get(seg_id)
-        name = (room_info.name if room_info and room_info.name else "") or f"Room {seg_id}"
+        name = default_room_name(
+            seg_id,
+            getattr(room_info, "name", "") or "",
+            getattr(room_info, "room_type", -1),
+        )
         color = list(ROOM_COLORS[(seg_id - 1) % len(ROOM_COLORS)])
 
         result[str(seg_id)] = {

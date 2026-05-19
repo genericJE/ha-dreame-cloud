@@ -36,6 +36,17 @@ The coordinator persists map data and device info to `.storage/dreame_cloud_map_
 - **Reconnection**: After a failure, `_connected = False` so the next poll cycle re-runs `_async_setup()`. Auth is locally cached when the token is valid, so the typical cost is one `device_list` RPC per 30s while the device is offline.
 - **Auth errors are not cached**: `ConfigEntryAuthFailed` always propagates (bad credentials should not be silently ignored).
 - **First-ever setup**: Still requires a live connection to discover the device. The cache only helps on subsequent startups.
+- **Interaction with HA 2026.5 segment integrity check**: `vacuum.py`'s `_handle_coordinator_update` compares `coordinator.data.map_data.rooms` against `last_seen_segments` and opens a repair issue on mismatch. Because `_build_offline_data()` preserves `self._map_data` (the cached `DreameMap`), an online > offline transition does **not** fire the issue — the room IDs are identical to what HA last saw. Genuine room changes (rare: typically only after a factory reset or remap in the Dreame app) still surface correctly when the device comes back online and the fresh map fetch returns different rooms. The `if not map_data.rooms: return` guard inside the integrity check also absorbs the periodic `seg_inf`-missing frames the device emits during fast map polling, so cleaning cycles don't generate false positives.
+
+## HA 2026.5 "Clean by area"
+
+The vacuum platform implements `VacuumEntityFeature.CLEAN_AREA` via `async_get_segments` / `async_clean_segments`:
+
+- **`async_get_segments`** returns one `Segment` per entry in `coordinator.data.map_data.rooms`, with `id=str(seg_id)` (the rism-side segment ID, the same one `cleanset` and segment-clean RPCs use) and `name=room.name or f"Room {seg_id}"` (Dreame leaves names empty for sub-segments and rooms the user hasn't named in the app — falling back to `Room <id>` keeps the dialog readable). Returns `[]` when no map is loaded yet (first install while docked).
+- **`async_clean_segments(segment_ids, **kwargs)`** is the HA built-in dialog handler. `kwargs` is empty in 2026.5 (the dialog has no per-call options) so it delegates to `async_clean_segment(segments=...)` with default suction/water/mode — the device's current settings apply implicitly.
+- **`_handle_coordinator_update`** override opens a repair issue (`async_create_segments_issue`) when `map_data.rooms` IDs no longer match `last_seen_segments`. Guarded against `map_data is None` and empty `seg_inf` frames.
+
+Do **not** use SLAM-internal pixel-grid IDs as segment IDs — they don't roundtrip to `cleanset` or segment-clean RPCs. The rism-side `seg_inf` IDs are the canonical ones.
 
 ## States in practice (X50 Ultra Complete)
 

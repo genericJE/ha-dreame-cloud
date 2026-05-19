@@ -31,6 +31,7 @@ from dreame_mocker.client import (
     MapHeader,
     RoomInfo,
 )
+from dreame_mocker.client.map_decoder import MapDecoder
 from dreame_mocker.const import STATES, DeviceState, Property
 
 from .const import (
@@ -203,6 +204,15 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         m.pixels = pixels
         m.rooms = rooms
         m.raw_metadata = metadata
+        # Rehydrate the rism (saved-map) blob so image.py can fall back to
+        # the dock's saved coordinates when the live header carries the
+        # firmware's "I'm asleep" sentinel positions (32766/32767), and so
+        # _compute_room_bboxes can group live pixel-grid IDs by rism ID.
+        # Without this, restarting from cache renders the map with no
+        # robot/charger marker and only the live IDs that coincidentally
+        # fall within the rism ID range.
+        rism_b64 = metadata.get("rism") if isinstance(metadata, dict) else None
+        m.rism = MapDecoder._decode_rism(rism_b64) if rism_b64 else None  # noqa: SLF001
         device_info: dict[str, str] = raw.get("device", {})
         return m, device_info
 
@@ -515,8 +525,8 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         try:
             async with asyncio.timeout(15):
                 new_map = await self.device.get_map()
-        except (DreameError, TimeoutError):
-            _LOGGER.debug("Fast map poll fetch failed")
+        except Exception as err:
+            _LOGGER.debug("Fast map poll fetch failed: %s", err)
             return
         self._map_data = new_map
         self._last_map_update = time.monotonic()

@@ -8,11 +8,12 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.vacuum import (
+    Segment,
     StateVacuumEntity,
     VacuumEntityFeature,  # pyright: ignore[reportAttributeAccessIssue,reportPrivateImportUsage]
 )
 from homeassistant.components.vacuum.const import VacuumActivity
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -24,6 +25,7 @@ from .const import (
     FAN_SPEED_TO_SUCTION,
     FAN_SPEEDS,
     SUCTION_TO_FAN_SPEED,
+    default_room_name,
 )
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
@@ -183,6 +185,7 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         | VacuumEntityFeature.FAN_SPEED
         | VacuumEntityFeature.STATE
         | VacuumEntityFeature.SEND_COMMAND
+        | VacuumEntityFeature.CLEAN_AREA
     )
     _attr_fan_speed_list = FAN_SPEEDS
     _attr_translation_key = "vacuum"
@@ -259,6 +262,54 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             await self.coordinator.device.return_to_dock()
         else:
             _LOGGER.warning("Unknown command: %s", command)
+
+    async def async_get_segments(self) -> list[Segment]:
+        """Return room segments for the HA "Clean by area" mapping dialog.
+
+        IDs come from the map's rism-side seg_inf (the same IDs that
+        cleanset and the segment-clean RPC use). Pixel-grid IDs are
+        SLAM-internal and would not roundtrip — do not use them here.
+
+        Returns [] when no map is loaded yet (first install while docked
+        and before any cleaning cycle has populated seg_inf). Unnamed
+        segments fall back to their Dreame room-type default (Kitchen,
+        Bathroom, etc.) and finally to "Room <id>", so the dialog
+        doesn't show blank rows.
+        """
+        map_data = self.coordinator.data.map_data
+        if map_data is None:
+            return []
+        return [
+            Segment(
+                id=str(seg_id),
+                name=default_room_name(seg_id, room.name, room.room_type),
+            )
+            for seg_id, room in map_data.rooms.items()
+        ]
+
+    async def async_clean_segments(
+        self, segment_ids: list[str], **kwargs: Any
+    ) -> None:
+        """Handle vacuum.clean_area for the HA built-in dialog.
+
+        kwargs is empty in 2026.5 (the dialog has no per-call options),
+        so we delegate to async_clean_segment with its defaults — the
+        device's current suction/water/mode are used implicitly.
+        """
+        await self.async_clean_segment(segments=[int(s) for s in segment_ids])
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Open a repair issue if the vacuum's room IDs no longer match the saved area mapping."""
+        super()._handle_coordinator_update()
+        last_seen = self.last_seen_segments
+        if last_seen is None:
+            return
+        map_data = self.coordinator.data.map_data
+        if map_data is None or not map_data.rooms:
+            return
+        if {str(seg_id) for seg_id in map_data.rooms} != {seg.id for seg in last_seen}:
+            self.async_create_segments_issue()
 
     async def async_clean_segment(
         self,

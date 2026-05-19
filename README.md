@@ -14,6 +14,7 @@ Built for the **Dreame X50 Ultra Complete**, but should work with other Dreame c
 - Start, pause, stop, return to dock
 - Fan speed control (Quiet / Standard / Strong / Turbo)
 - Room-specific cleaning via `clean_segment` service
+- "Clean by area" via the HA built-in dialog (HA Core 2026.5+, `VacuumEntityFeature.CLEAN_AREA`) — segments are populated from the map's rism-side `seg_inf`; HA opens a repair issue automatically if the device's room IDs change vs the saved area mapping
 - Send raw commands via `send_command`
 - State attributes: error code, room list
 
@@ -142,7 +143,7 @@ The integration uses the `dreame-mocker` client library which handles:
 
 ## Requirements
 
-- Home Assistant 2025.1+
+- Home Assistant **2026.5+** (the vacuum platform uses `Segment` and `VacuumEntityFeature.CLEAN_AREA`, both introduced in 2026.5)
 - Python 3.13+
 - A Dreame account with password authentication enabled
 - A cloud-connected Dreame vacuum (tested with X50 Ultra Complete)
