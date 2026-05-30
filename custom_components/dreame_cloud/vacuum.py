@@ -43,10 +43,14 @@ STATE_MAP: dict[int, VacuumActivity] = {
     DeviceState.MOPPING: VacuumActivity.CLEANING,
     DeviceState.DRYING: VacuumActivity.DOCKED,
     DeviceState.WASHING: VacuumActivity.DOCKED,
+    DeviceState.RETURNING_WASHING: VacuumActivity.RETURNING,
+    DeviceState.BUILDING: VacuumActivity.CLEANING,
     DeviceState.SWEEP_AND_MOP: VacuumActivity.CLEANING,
     DeviceState.CHARGE_COMPLETE: VacuumActivity.DOCKED,
+    DeviceState.UPGRADING: VacuumActivity.IDLE,
     DeviceState.MOP_WASHING: VacuumActivity.DOCKED,
     DeviceState.MOP_WASHING_PAUSED: VacuumActivity.PAUSED,
+    DeviceState.EMPTYING: VacuumActivity.DOCKED,
 }
 
 
