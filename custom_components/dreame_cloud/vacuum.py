@@ -86,6 +86,18 @@ async def async_setup_entry(
         },
         "async_clean_segment",
     )
+    platform.async_register_entity_service(
+        "set_segment_wetness",
+        {
+            vol.Required("segments"): vol.All(
+                vol.Coerce(list), [vol.Coerce(int)]
+            ),
+            vol.Required("wetness"): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=32)
+            ),
+        },
+        "async_set_segment_wetness",
+    )
     _zone_schema = vol.All(
         vol.Coerce(list),
         [
@@ -330,6 +342,10 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
           action (siid=4, aiid=1) with two piids:
             piid 1 (STATUS) = 18 (SEGMENT_CLEANING status code)
             piid 10 (CLEANING_PROPERTIES) = json({"selects": [[seg, repeat, suction, water, 1]]})
+
+        ``water_volume`` is the coarse 1-3 level. The robot honours each
+        room's stored per-room mop wetness from the saved-map cleanset when
+        Customized Cleaning is on (set it with ``set_segment_wetness``).
         """
         if not segments:
             return
@@ -351,6 +367,23 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             _LOGGER.exception("Failed to start segment cleaning")
             return
         await self.coordinator.async_request_refresh()
+
+    async def async_set_segment_wetness(
+        self,
+        segments: list[int] | None = None,
+        wetness: int = 16,
+        **kwargs: Any,
+    ) -> None:
+        """Set the per-room mop wetness (1-32) for one or more rooms.
+
+        Persists the value into the saved-map ``cleanset`` so it applies to
+        every subsequent clean of that room (not just the next one), matching
+        the per-room Mop Wetness slider in the Dreame app. Requires the
+        ``Customized Cleaning`` switch to be on for the device to honour it.
+        """
+        if not segments:
+            return
+        await self.coordinator.async_set_segment_wetness(segments, wetness)
 
     async def async_update_map(
         self,

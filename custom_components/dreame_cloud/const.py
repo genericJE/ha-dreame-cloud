@@ -98,6 +98,25 @@ INT_TO_MOP_WASH_LEVEL: dict[int, str] = {
     v: k for k, v in MOP_WASH_LEVEL_TO_INT.items()
 }
 
+# Onboard clean-water low-level warning (siid 4 piid 41). The firmware raises
+# this when the robot's small onboard tank (fed from the dock) runs low; at
+# NO_WATER_FOR_CLEAN it silently drops to vacuum-only ("switched to Vacuuming
+# Mode") — i.e. the mop runs dry. Only meaningful on self-wash-base models
+# without the plumbed water-hookup (where the clean tank can actually empty).
+LOW_WATER_WARNING = (4, 41)
+LOW_WATER_WARNINGS: dict[int, str] = {
+    0: "OK",
+    1: "Dismissed",
+    2: "No water left",
+    3: "No water left after clean",
+    4: "No water for clean (mopping disabled)",
+    5: "Low water",
+    6: "Tank not installed",
+}
+# Codes that mean the robot is out of/low on clean water and mopping will run
+# dry. 0 (OK) and 1 (user-dismissed) are not surfaced as a problem.
+LOW_WATER_PROBLEM_CODES = frozenset({2, 3, 4, 5})
+
 # Room colors for map rendering (RGB)
 ROOM_COLORS: list[tuple[int, int, int]] = [
     (135, 206, 235),

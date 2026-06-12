@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -12,6 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from dreame_mocker.const import DeviceState
 
 from . import DreameCloudConfigEntry
+from .const import LOW_WATER_PROBLEM_CODES, LOW_WATER_WARNINGS
 from .coordinator import DreameCloudCoordinator
 from .entity import DreameCloudEntity
 
@@ -27,6 +30,7 @@ async def async_setup_entry(
         DreameCloudChargingSensor(coordinator),
         DreameCloudMopInStationSensor(coordinator),
         DreameCloudMopPadInstalledSensor(coordinator),
+        DreameCloudLowWaterSensor(coordinator),
     ])
 
 
@@ -77,3 +81,34 @@ class DreameCloudMopPadInstalledSensor(DreameCloudEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         return self.coordinator.data.mop_pad_installed
+
+
+class DreameCloudLowWaterSensor(DreameCloudEntity, BinarySensorEntity):
+    """On when the onboard clean-water tank is low/empty.
+
+    When this fires during a mop run the robot drops to vacuum-only and the
+    pads run dry. Only meaningful without the plumbed water hookup; the
+    firmware reports no warning when the dock auto-refills.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:water-alert"
+    _attr_translation_key = "low_water"
+
+    def __init__(self, coordinator: DreameCloudCoordinator) -> None:
+        """Initialize."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.device_id}_low_water"
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.data.low_water_warning in LOW_WATER_PROBLEM_CODES
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the raw warning code and its description."""
+        code = self.coordinator.data.low_water_warning
+        return {
+            "warning_code": code,
+            "warning": LOW_WATER_WARNINGS.get(code, "Unknown"),
+        }

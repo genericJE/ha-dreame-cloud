@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -21,6 +22,7 @@ from PIL import Image, ImageDraw
 from dreame_mocker.client import DreameMap, MapHeader
 
 from . import DreameCloudConfigEntry
+from .cleanset import parse_cleanset
 from .const import (
     COLOR_BACKGROUND,
     COLOR_CHARGER,
@@ -62,9 +64,7 @@ class DreameCloudMapImage(DreameCloudEntity, ImageEntity):
         self._attr_unique_id = f"{coordinator.device_id}_floor_plan"
         self._image: bytes | None = None
         self._map_attrs: dict[str, Any] = {}
-        self._last_frame_id: int | None = None
-        self._last_opts: tuple[int, bool, bool] | None = None
-        self._last_pending: dict[str, Any] | None = None
+        self._last_render_sig: str | None = None
 
     async def async_added_to_hass(self) -> None:
         """Register for option updates when added to hass."""
@@ -100,7 +100,6 @@ class DreameCloudMapImage(DreameCloudEntity, ImageEntity):
         if map_data is None:
             return
 
-        frame_id = map_data.header.frame_id
         options = self.coordinator.config_entry.options
         opts_key = (
             options.get(CONF_MAP_ROTATION, 0),
@@ -108,16 +107,66 @@ class DreameCloudMapImage(DreameCloudEntity, ImageEntity):
             options.get(CONF_MAP_FLIP_Y, False),
         )
         pending = self.coordinator.pending_zone_update
-        pending_changed = pending is not self._last_pending
-        if frame_id != self._last_frame_id or opts_key != self._last_opts or pending_changed:
+        # Re-render whenever any render input changes — not just when
+        # frame_id advances.  A docked robot emits no new map frames, so
+        # room renames, threshold, zone and furniture edits made in the
+        # Dreame app (and pulled in by a manual map refresh) carry the old
+        # frame_id and would otherwise never repaint.
+        signature = self._render_signature(map_data, opts_key, pending)
+        if signature != self._last_render_sig:
             self._image, self._map_attrs = await self.hass.async_add_executor_job(
                 _render_map, map_data, *opts_key, pending,
             )
-            self._last_frame_id = frame_id
-            self._last_opts = opts_key
-            self._last_pending = pending
+            self._last_render_sig = signature
             self._attr_image_last_updated = datetime.now(UTC)
         self.async_write_ha_state()
+
+    def _render_signature(
+        self,
+        map_data: DreameMap,
+        opts_key: tuple[int, bool, bool],
+        pending: dict[str, Any] | None,
+    ) -> str:
+        """Return a hash of every input that affects the rendered map.
+
+        Keyed on the pixel frame (``frame_id``), orientation options,
+        robot/charger pose, room names/types, the pending zone overlay,
+        and the zone & furniture metadata the renderer reads (``vw``,
+        ``vws``, ``sneak_areas``, ``ai_furniture``/``ai_furniture_user``
+        and the ``rism`` saved-map blob).  When the robot is docked
+        ``frame_id`` is frozen, so this content signature is what lets an
+        in-app edit surface after a manual map refresh.
+        """
+        header = map_data.header
+        meta = map_data.raw_metadata
+        payload = {
+            "frame_id": header.frame_id,
+            "robot": (header.robot_x, header.robot_y, header.robot_angle),
+            "charger": (
+                header.charger_x,
+                header.charger_y,
+                header.charger_angle,
+            ),
+            "opts": opts_key,
+            "rooms": [
+                [sid, getattr(room, "name", ""), getattr(room, "room_type", -1)]
+                for sid, room in sorted(map_data.rooms.items())
+            ],
+            "meta": {
+                key: meta.get(key)
+                for key in (
+                    "vw",
+                    "vws",
+                    "sneak_areas",
+                    "ai_furniture",
+                    "ai_furniture_user",
+                    "rism",
+                )
+            },
+            "pending": pending,
+        }
+        blob = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.sha256(blob.encode()).hexdigest()
 
     async def async_image(self) -> bytes | None:
         """Return the current map image."""
@@ -248,6 +297,34 @@ def _compute_room_bboxes(
         }
 
     return result
+
+
+def _merge_cleanset_into_rooms(
+    room_bboxes: dict[str, dict[str, Any]],
+    map_data: DreameMap,
+) -> None:
+    """Add per-room cleaning settings to the room bboxes from the cleanset.
+
+    Mutates ``room_bboxes`` in place, adding ``wetness`` (1-32), ``suction``,
+    ``cleaning_mode`` and ``cleaning_times`` to each room. The cleanset keys
+    are the same rism-side segment IDs as the bounding boxes, so they align
+    directly. Falls back to the rism saved map when the live frame omits the
+    cleanset.
+    """
+    cleanset = map_data.raw_metadata.get("cleanset")
+    if not cleanset:
+        rism = getattr(map_data, "rism", None)
+        if rism is not None:
+            cleanset = rism.raw_metadata.get("cleanset")
+    for seg_id, seg in parse_cleanset(cleanset).items():
+        room = room_bboxes.get(str(seg_id))
+        if room is None:
+            continue
+        room["wetness"] = seg.wetness
+        room["suction"] = seg.suction
+        room["cleaning_mode"] = seg.cleaning_mode
+        room["cleaning_times"] = seg.cleaning_times
+        room["cleaning_order"] = seg.order
 
 
 def _vacuum_to_image(
@@ -968,6 +1045,7 @@ def _render_map(
         pixel_array, w, h, flip_x, flip_y, rotation, scale,
         map_data.rooms, live_to_rism,
     )
+    _merge_cleanset_into_rooms(room_bboxes, map_data)
 
     attrs: dict[str, Any] = {
         "map_width": w_out * scale,

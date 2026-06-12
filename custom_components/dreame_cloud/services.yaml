@@ -50,6 +50,35 @@ clean_segment:
           max: 2
           mode: slider
 
+set_segment_wetness:
+  name: Set Mop Wetness
+  description: >-
+    Set the per-room mop wetness (1-32) stored in the saved map, matching the
+    Dreame app's per-room Mop Wetness slider. Applies to every subsequent
+    clean of the room. Requires the Customized Cleaning switch to be on.
+  target:
+    entity:
+      integration: dreame_cloud
+      domain: vacuum
+  fields:
+    segments:
+      name: Segments
+      description: List of room segment IDs to update.
+      required: true
+      example: "[1, 2]"
+      selector:
+        object:
+    wetness:
+      name: Mop Wetness
+      description: "Mop wetness from 1 (slightly dry) to 32 (wet)."
+      required: true
+      default: 16
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: slider
+
 update_map:
   name: Update Map
   description: Update map features like no-go zones, virtual walls, and low-clearance areas.

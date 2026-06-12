@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -34,9 +34,16 @@ from dreame_mocker.client import (
 from dreame_mocker.client.map_decoder import MapDecoder
 from dreame_mocker.const import STATES, DeviceState, Property
 
+from .cleanset import (
+    apply_wetness,
+    parse_cleanset,
+    to_custome_clean,
+    to_stored,
+)
 from .const import (
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
+    LOW_WATER_WARNING,
     MAP_FAST_POLL_INTERVAL_CLEANING,
     OFFLINE_THRESHOLD_SECONDS,
 )
@@ -62,6 +69,8 @@ class DreameCloudData:
     mop_in_station: bool = True
     mop_pad_installed: bool = True
     customized_cleaning: bool = False
+    # Onboard clean-water low-level warning (siid 4 piid 41); 0 = OK.
+    low_water_warning: int = 0
 
 
 class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
@@ -362,6 +371,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 Property.MOP_IN_STATION,
                 Property.MOP_PAD_INSTALLED,
                 Property.CUSTOMIZED_CLEANING,
+                LOW_WATER_WARNING,
             ])
 
             # Index results by (siid, piid) for easy lookup.
@@ -413,6 +423,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             customized_cleaning = bool(
                 values.get(Property.CUSTOMIZED_CLEANING, False),
             )
+            low_water_warning = int(values.get(LOW_WATER_WARNING, 0))
 
             is_cleaning = status.state in (
                 DeviceState.SWEEPING,
@@ -456,6 +467,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 mop_in_station=mop_in_station,
                 mop_pad_installed=mop_pad_installed,
                 customized_cleaning=customized_cleaning,
+                low_water_warning=low_water_warning,
             )
         except AuthenticationError as err:
             self._connected = False
@@ -500,6 +512,78 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     def set_map_data(self, map_data: DreameMap) -> None:
         """Replace the cached map data (used by request_map for investigation)."""
         self._map_data = map_data
+
+    def current_cleanset(self) -> str | dict[str, Any] | None:
+        """Return the best-available stored ``cleanset`` (live frame, then rism).
+
+        The live map frame usually carries ``cleanset`` in its trailing JSON;
+        when it is absent (e.g. a partial frame) we fall back to the embedded
+        rism saved map, which is the canonical home of per-room settings.
+        """
+        md = self._map_data
+        if md is None:
+            return None
+        cleanset = md.raw_metadata.get("cleanset")
+        if cleanset:
+            return cleanset
+        rism = getattr(md, "rism", None)
+        if rism is not None:
+            return rism.raw_metadata.get("cleanset")
+        return None
+
+    async def async_set_segment_wetness(
+        self, segment_ids: list[int], wetness: int,
+    ) -> list[int]:
+        """Set per-room mop wetness (1-32) for the given segments.
+
+        Reads the current per-room ``cleanset``, updates the wetness of the
+        named segments, and writes the *whole* set back via the map-update
+        action (siid 6, aiid 2, piid 4) wrapped under ``customeClean`` — the
+        same mechanism the Dreame app uses. The remaining rooms are written
+        back unchanged. For the device to honour these values during a clean,
+        the ``Customized Cleaning`` switch (siid 4 piid 26) must be on.
+
+        Returns the segment ids that were actually updated.
+        """
+        segments = parse_cleanset(self.current_cleanset())
+        if not segments:
+            raise HomeAssistantError(
+                "No per-room cleaning data is loaded yet — the robot's map "
+                "must be available before mop wetness can be set.",
+            )
+        updated = apply_wetness(segments, segment_ids, wetness)
+        if not updated:
+            raise HomeAssistantError(
+                f"None of segments {list(segment_ids)} exist in the saved map "
+                f"(known rooms: {sorted(segments)}).",
+            )
+
+        value = json.dumps(
+            {"customeClean": to_custome_clean(segments)},
+            separators=(",", ":"),
+        )
+        await self.device.send_action(
+            6, 2, params=[{"piid": 4, "value": value}],
+        )
+
+        if not self.data.customized_cleaning:
+            _LOGGER.warning(
+                "Mop wetness updated for rooms %s, but Customized Cleaning is "
+                "off — the robot will keep using the global water level until "
+                "the Customized Cleaning switch is turned on.",
+                updated,
+            )
+
+        # Optimistically reflect the change in the cached map so the card and
+        # the image entity's per-room attributes update immediately. The
+        # cloud's saved-map cleanset reconciles on the next live map fetch.
+        if self._map_data is not None:
+            self._map_data.raw_metadata["cleanset"] = json.dumps(
+                to_stored(segments), separators=(",", ":"),
+            )
+            await self._async_save_map_cache(self._map_data)
+        await self.async_request_refresh()
+        return updated
 
     def _start_fast_map_poll(self) -> None:
         """Start the fast map poll loop if not already running."""
@@ -546,6 +630,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 mop_in_station=self.data.mop_in_station,
                 mop_pad_installed=self.data.mop_pad_installed,
                 customized_cleaning=self.data.customized_cleaning,
+                low_water_warning=self.data.low_water_warning,
             )
         )
 
