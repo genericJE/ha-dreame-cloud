@@ -1,6 +1,6 @@
 [project]
 name = "ha-dreame-cloud"
-version = "0.3.11"
+version = "0.3.12"
 description = "Dreame Cloud Vacuum integration for Home Assistant"
 license = "MIT"
 license-files = ["LICENSE"]
