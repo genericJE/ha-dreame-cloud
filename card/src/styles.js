@@ -634,6 +634,50 @@ export function getStyles() {
       .settings-alias-input:focus {
         border-color: var(--accent);
       }
+      .settings-wetness-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      .settings-wetness-name {
+        font-size: 13px;
+        color: var(--text-secondary);
+        min-width: 70px;
+        flex-shrink: 0;
+      }
+      .settings-wetness-slider {
+        flex: 1;
+        -webkit-appearance: none;
+        appearance: none;
+        height: 6px;
+        background: var(--surface);
+        border-radius: 3px;
+        outline: none;
+      }
+      .settings-wetness-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 18px;
+        height: 18px;
+        background: var(--accent);
+        border-radius: 50%;
+        cursor: pointer;
+      }
+      .settings-wetness-slider::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        background: var(--accent);
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+      }
+      .settings-wetness-value {
+        min-width: 24px;
+        text-align: right;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
       .settings-alias-vis {
         background: none;
         border: none;

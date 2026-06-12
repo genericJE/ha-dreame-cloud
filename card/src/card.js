@@ -2128,6 +2128,22 @@ class DreameVacuumMapCard extends HTMLElement {
         }).join("")
       : '<div style="font-size:12px;color:var(--text-secondary)">No rooms detected yet.</div>';
 
+    const wetnessRooms = roomEntries.filter(
+      ([, room]) => room.wetness !== undefined && room.wetness !== null,
+    );
+    const roomWetnessHtml = wetnessRooms.length > 0
+      ? wetnessRooms.map(([segId, room]) => {
+          const label = aliases[segId] || room.name;
+          return `
+            <div class="settings-wetness-row">
+              <span class="settings-wetness-name">${label}</span>
+              <input type="range" class="settings-wetness-slider" data-seg-id="${segId}" min="1" max="32" value="${room.wetness}" />
+              <span class="settings-wetness-value" data-seg-id="${segId}">${room.wetness}</span>
+            </div>
+          `;
+        }).join("")
+      : '<div style="font-size:12px;color:var(--text-secondary)">No per-room wetness data yet.</div>';
+
     panel.innerHTML = `
       <div class="settings-header">
         <span>Settings</span>
@@ -2187,6 +2203,11 @@ class DreameVacuumMapCard extends HTMLElement {
       </div>
 
       <div class="settings-section">
+        <h3>Mop Wetness</h3>
+        ${roomWetnessHtml}
+      </div>
+
+      <div class="settings-section">
         <h3>Room Names</h3>
         ${roomAliasesHtml}
       </div>
@@ -2236,6 +2257,26 @@ class DreameVacuumMapCard extends HTMLElement {
             option: value,
           });
         }
+      });
+    });
+
+    // Per-room mop wetness sliders
+    panel.querySelectorAll(".settings-wetness-slider").forEach((wslider) => {
+      let wetnessTimeout = null;
+      wslider.addEventListener("input", () => {
+        const segId = wslider.dataset.segId;
+        const valEl = panel.querySelector(
+          `.settings-wetness-value[data-seg-id="${segId}"]`,
+        );
+        if (valEl) valEl.textContent = wslider.value;
+        clearTimeout(wetnessTimeout);
+        wetnessTimeout = setTimeout(() => {
+          this._hass.callService("dreame_cloud", "set_segment_wetness", {
+            entity_id: this._entities.vacuum,
+            segments: [parseInt(segId, 10)],
+            wetness: parseInt(wslider.value, 10),
+          });
+        }, 400);
       });
     });
 

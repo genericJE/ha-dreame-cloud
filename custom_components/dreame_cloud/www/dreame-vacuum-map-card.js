@@ -775,6 +775,50 @@
       .settings-alias-input:focus {
         border-color: var(--accent);
       }
+      .settings-wetness-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      .settings-wetness-name {
+        font-size: 13px;
+        color: var(--text-secondary);
+        min-width: 70px;
+        flex-shrink: 0;
+      }
+      .settings-wetness-slider {
+        flex: 1;
+        -webkit-appearance: none;
+        appearance: none;
+        height: 6px;
+        background: var(--surface);
+        border-radius: 3px;
+        outline: none;
+      }
+      .settings-wetness-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 18px;
+        height: 18px;
+        background: var(--accent);
+        border-radius: 50%;
+        cursor: pointer;
+      }
+      .settings-wetness-slider::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        background: var(--accent);
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+      }
+      .settings-wetness-value {
+        min-width: 24px;
+        text-align: right;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
       .settings-alias-vis {
         background: none;
         border: none;
@@ -3009,6 +3053,19 @@
             </div>
           `;
       }).join("") : '<div style="font-size:12px;color:var(--text-secondary)">No rooms detected yet.</div>';
+      const wetnessRooms = roomEntries.filter(
+        ([, room]) => room.wetness !== void 0 && room.wetness !== null
+      );
+      const roomWetnessHtml = wetnessRooms.length > 0 ? wetnessRooms.map(([segId, room]) => {
+        const label = aliases[segId] || room.name;
+        return `
+            <div class="settings-wetness-row">
+              <span class="settings-wetness-name">${label}</span>
+              <input type="range" class="settings-wetness-slider" data-seg-id="${segId}" min="1" max="32" value="${room.wetness}" />
+              <span class="settings-wetness-value" data-seg-id="${segId}">${room.wetness}</span>
+            </div>
+          `;
+      }).join("") : '<div style="font-size:12px;color:var(--text-secondary)">No per-room wetness data yet.</div>';
       panel.innerHTML = `
       <div class="settings-header">
         <span>Settings</span>
@@ -3068,6 +3125,11 @@
       </div>
 
       <div class="settings-section">
+        <h3>Mop Wetness</h3>
+        ${roomWetnessHtml}
+      </div>
+
+      <div class="settings-section">
         <h3>Room Names</h3>
         ${roomAliasesHtml}
       </div>
@@ -3113,6 +3175,24 @@
               option: value
             });
           }
+        });
+      });
+      panel.querySelectorAll(".settings-wetness-slider").forEach((wslider) => {
+        let wetnessTimeout = null;
+        wslider.addEventListener("input", () => {
+          const segId = wslider.dataset.segId;
+          const valEl = panel.querySelector(
+            `.settings-wetness-value[data-seg-id="${segId}"]`
+          );
+          if (valEl) valEl.textContent = wslider.value;
+          clearTimeout(wetnessTimeout);
+          wetnessTimeout = setTimeout(() => {
+            this._hass.callService("dreame_cloud", "set_segment_wetness", {
+              entity_id: this._entities.vacuum,
+              segments: [parseInt(segId, 10)],
+              wetness: parseInt(wslider.value, 10)
+            });
+          }, 400);
         });
       });
       panel.querySelectorAll(".settings-alias-input").forEach((input) => {
