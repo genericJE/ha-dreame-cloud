@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 # Per-room mop wetness slider range (max-32 / WETNESS_LEVEL model family).
 WETNESS_MIN = 1
@@ -61,10 +61,10 @@ class SegmentCleanset:
     order: int | None = None
     cleaning_mode: int | None = 2
     mopping_settings: int | None = None
-    extra: list[int] = field(default_factory=list)
+    extra: list[int] = field(default_factory=list[int])
     # The exact stored array as the device emitted it, kept so the stored
     # form can be reproduced byte-for-byte (see :func:`to_stored`).
-    raw: list[int] = field(default_factory=list)
+    raw: list[int] = field(default_factory=list[int])
 
 
 def parse_cleanset(raw: str | dict[str, Any] | None) -> dict[int, SegmentCleanset]:
@@ -87,10 +87,10 @@ def parse_cleanset(raw: str | dict[str, Any] | None) -> dict[int, SegmentCleanse
         return {}
 
     out: dict[int, SegmentCleanset] = {}
-    for key, value in data.items():
+    for key, value in cast(dict[Any, Any], data).items():
         try:
             seg_id = int(key)
-            arr = [int(x) for x in value]
+            arr = [int(x) for x in cast(list[Any], value)]
         except (ValueError, TypeError):
             continue
         out[seg_id] = SegmentCleanset(

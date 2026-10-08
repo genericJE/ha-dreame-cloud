@@ -26,7 +26,10 @@ async def async_setup_entry(
 ) -> bool:
     """Set up Dreame Cloud Vacuum from a config entry."""
     if not hass.data.get(f"{DOMAIN}_card_registered"):
-        from homeassistant.components.http import StaticPathConfig
+        # Re-export; defined in http.server only since 2026.9.
+        from homeassistant.components.http import (
+            StaticPathConfig,  # pyright: ignore[reportPrivateImportUsage]
+        )
 
         await hass.http.async_register_static_paths(
             [StaticPathConfig(CARD_URL, CARD_PATH, cache_headers=False)]

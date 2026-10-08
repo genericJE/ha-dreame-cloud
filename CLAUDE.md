@@ -172,7 +172,7 @@ GitHub Actions CI (`.github/workflows/ci.yml`) runs on every push and PR to `mai
 | Job | Blocking | What it does |
 |-----|----------|--------------|
 | **lint** | yes | Runs `ruff check` via `astral-sh/ruff-action@v3`. Config is `select = ["ALL"]` in `pyproject.toml` with ignores for rules incompatible with HA conventions (docstrings, boolean traps, type-checking imports, complexity, etc.). |
-| **typecheck** | no | Runs `pyright` in strict mode. Installs public deps plus `dreame-mocker` via HTTPS into a fresh venv. Non-blocking (`continue-on-error: true`) because ~100 strict violations exist, mostly `reportUnknownMemberType` cascading from HA's partially-typed base classes. The venv follows `requires-python` (3.14, which HA has needed since 2026.3); dreame-mocker ships `py.typed`, so no local stubs are needed. |
+| **typecheck** | yes | Runs `pyright` in strict mode via `uv sync && uv run pyright custom_components`, against the locked HA version. Must stay at 0 errors. Two typing seams worth knowing: `voluptuous` is imported as `probatio` under `TYPE_CHECKING` (HA 2026.9+ aliases it at runtime and types its APIs against probatio), and HA's own `VolSchemaType` contains `probatio.All[Unknown]`, so `vacuum.py` binds `async_register_entity_service` once with a targeted ignore. |
 | **js-build** | yes | Syntax-checks each source module in `card/src/*.js`, runs `npm run build` (esbuild), syntax-checks the output bundle, then verifies the committed bundle matches the build output (`git diff --exit-code`). Catches forgotten rebuilds. |
 | **version-sync** | yes | Reads version from both `pyproject.toml` and `manifest.json` and fails if they differ. |
 
@@ -194,8 +194,8 @@ uv run pytest
 # Python linting (must pass before push)
 ruff check custom_components/
 
-# Type checking (informational, not required to pass)
-pyright custom_components/
+# Type checking (must pass, 0 errors)
+uv run pyright custom_components
 
 # JS build (from card/ directory)
 cd card && npm run build

@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
-import voluptuous as vol
+if TYPE_CHECKING:
+    # HA 2026.9+ validates with probatio and aliases ``voluptuous`` to it at
+    # startup; type against probatio, keep the import working on 2026.5-2026.8.
+    import probatio as vol
+else:
+    import voluptuous as vol
 from homeassistant.components.vacuum import (
     Segment,
     StateVacuumEntity,
@@ -65,7 +71,10 @@ async def async_setup_entry(
 
     # Register custom services
     platform = entity_platform.async_get_current_platform()
-    platform.async_register_entity_service(
+    # HA's own VolSchemaType alias contains probatio.All[Unknown], so strict
+    # pyright flags the method itself as partially unknown; bind it once.
+    register: Callable[..., None] = platform.async_register_entity_service  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    register(
         "clean_segment",
         {
             vol.Required("segments"): vol.All(
@@ -86,7 +95,7 @@ async def async_setup_entry(
         },
         "async_clean_segment",
     )
-    platform.async_register_entity_service(
+    register(
         "set_segment_wetness",
         {
             vol.Required("segments"): vol.All(
@@ -113,7 +122,7 @@ async def async_setup_entry(
             )
         ],
     )
-    platform.async_register_entity_service(
+    register(
         "update_map",
         {
             vol.Optional("no_go_zones"): _zone_schema,
@@ -149,7 +158,7 @@ async def async_setup_entry(
         },
         "async_update_map",
     )
-    platform.async_register_entity_service(
+    register(
         "clean_zone",
         {
             vol.Required("zones"): vol.All(
@@ -171,7 +180,7 @@ async def async_setup_entry(
         },
         "async_clean_zone",
     )
-    platform.async_register_entity_service(
+    register(
         "goto",
         {
             vol.Required("x"): vol.Coerce(int),
@@ -179,7 +188,7 @@ async def async_setup_entry(
         },
         "async_goto",
     )
-    platform.async_register_entity_service(
+    register(
         "request_map",
         {
             vol.Optional("req_type", default=1): vol.All(

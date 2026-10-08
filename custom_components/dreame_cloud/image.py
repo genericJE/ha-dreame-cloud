@@ -1037,9 +1037,8 @@ def _render_map(
     # The X50 firmware allocates volatile SLAM-internal segment IDs in
     # the live pixel grid that don't match the user-facing IDs the
     # device's cleanset/clean_segment expect — translate via the rism
-    # saved-map mapping when dreame-mocker exposes it (>=v0.1.2).
-    mapper = getattr(map_data, "live_to_rism_segment_map", None)
-    live_to_rism = mapper() if callable(mapper) else {}
+    # saved-map mapping.
+    live_to_rism = map_data.live_to_rism_segment_map()
     room_bboxes = _compute_room_bboxes(
         pixel_array, w, h, flip_x, flip_y, rotation, scale,
         map_data.rooms, live_to_rism,

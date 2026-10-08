@@ -15,18 +15,11 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
-    # Informational: strict mode still has ~100 violations, mostly HA's
-    # partially typed base classes (see CLAUDE.md).
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - name: Install dependencies
-        run: |
-          uv venv
-          uv pip install homeassistant Pillow numpy pyright
-          uv pip install "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git"
-      - run: .venv/bin/pyright --pythonpath .venv/bin/python custom_components
+      - run: uv sync
+      - run: uv run pyright custom_components
 
   test:
     runs-on: ubuntu-latest

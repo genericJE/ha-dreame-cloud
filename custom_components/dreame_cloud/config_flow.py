@@ -5,10 +5,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
-import voluptuous as vol
+
+if TYPE_CHECKING:
+    # HA 2026.9+ validates with probatio and aliases ``voluptuous`` to it at
+    # startup; type against probatio, keep the import working on 2026.5-2026.8.
+    import probatio as vol
+else:
+    import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant

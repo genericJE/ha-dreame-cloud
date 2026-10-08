@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -216,13 +216,14 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         rooms: dict[int, Any] = {}
         for k, v in raw["rooms"].items():
             seg_id = int(k)
-            if isinstance(v, dict) and "segment_id" in v and "name" in v:
+            d = cast(dict[str, Any], v) if isinstance(v, dict) else None
+            if d is not None and "segment_id" in d and "name" in d:
                 rooms[seg_id] = RoomInfo(
-                    segment_id=int(v.get("segment_id", seg_id)),
-                    room_id=int(v.get("room_id", seg_id)),
-                    name=str(v.get("name", "")),
-                    room_type=int(v.get("room_type", -1)),
-                    neighbors=list(v.get("neighbors", [])),
+                    segment_id=int(d.get("segment_id", seg_id)),
+                    room_id=int(d.get("room_id", seg_id)),
+                    name=str(d.get("name", "")),
+                    room_type=int(d.get("room_type", -1)),
+                    neighbors=list(d.get("neighbors", [])),
                 )
             else:
                 rooms[seg_id] = v
@@ -239,8 +240,8 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         # Without this, restarting from cache renders the map with no
         # robot/charger marker and only the live IDs that coincidentally
         # fall within the rism ID range.
-        rism_b64 = metadata.get("rism") if isinstance(metadata, dict) else None
-        m.rism = MapDecoder._decode_rism(rism_b64) if rism_b64 else None  # noqa: SLF001
+        rism_b64 = metadata.get("rism")
+        m.rism = MapDecoder._decode_rism(rism_b64) if rism_b64 else None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
         device_info: dict[str, str] = raw.get("device", {})
         return m, device_info
 
@@ -251,9 +252,11 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         # RoomInfo is a dataclass; convert each entry to a dict so json.dumps
         # works. Pre-rism-fallback (dreame-mocker <0.1.2) this dict was always
         # empty, so the previous direct json.dumps happened to succeed.
+        # Rooms loaded from a pre-v0.3.6 cache may still be opaque values.
+        rooms: dict[int, Any] = map_data.rooms
         rooms_serializable: dict[int, Any] = {
             k: dataclasses.asdict(v) if isinstance(v, RoomInfo) else v
-            for k, v in map_data.rooms.items()
+            for k, v in rooms.items()
         }
         payload: dict[str, Any] = {
             "header": header_dict,
