@@ -7,7 +7,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.14.2"
 dependencies = [
     "homeassistant>=2026.5.0",
-    "dreame-mocker @ git+ssh://git@github-personal/genericJE/dreame-mocker.git",
+    "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git@v0.1.5",
     "Pillow>=10.0.0",
     "numpy>=1.26.0",
 ]
@@ -22,11 +22,17 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["custom_components/dreame_cloud"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pyright>=1.1.400",
     "ruff>=0.11",
+    "pytest-homeassistant-custom-component",
+    "dreame-mocker[server] @ git+https://github.com/genericJE/dreame-mocker.git@v0.1.5",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
@@ -54,6 +60,13 @@ ignore = [
     "PLR0915",  # too many statements
     "PLR0917",  # too many positional arguments (HA platform/renderer signatures)
     "CPY001",   # copyright notice header (not used in this project)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",      # pytest asserts
+    "S105",      # mock-cloud credentials
+    "ASYNC240",  # small sync Path calls on test fixtures
 ]
 
 [tool.ruff.lint.isort]

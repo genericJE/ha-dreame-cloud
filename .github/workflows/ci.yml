@@ -28,6 +28,14 @@ jobs:
           uv pip install "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git"
       - run: .venv/bin/pyright --pythonpath .venv/bin/python custom_components
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run pytest -q
+
   version-sync:
     runs-on: ubuntu-latest
     steps:

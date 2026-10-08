@@ -176,9 +176,21 @@ GitHub Actions CI (`.github/workflows/ci.yml`) runs on every push and PR to `mai
 | **js-build** | yes | Syntax-checks each source module in `card/src/*.js`, runs `npm run build` (esbuild), syntax-checks the output bundle, then verifies the committed bundle matches the build output (`git diff --exit-code`). Catches forgotten rebuilds. |
 | **version-sync** | yes | Reads version from both `pyproject.toml` and `manifest.json` and fails if they differ. |
 
+### Tests
+
+`tests/test_e2e.py` runs the integration inside a real Home Assistant (via `pytest-homeassistant-custom-component`) against dreame-mocker's mock cloud, which `tests/conftest.py` serves with uvicorn in a background thread on a free localhost port. It covers the config flow, all platforms and services, Clean by area, the offline-cache startup, null properties, stale-token recovery and reauth. Things that are not obvious:
+
+- The plugin ships its own `custom_components` package, which wins the import; `conftest.py` appends this repo's `custom_components` to its `__path__` so HA's loader finds `dreame_cloud`.
+- `HOME` is pointed at a temp dir per test so a token cache can never land in the real `~/.config`.
+- The plugin pins an exact HA version (currently a 2026.10 beta); the HA version under test follows whatever the newest plugin release pins.
+- The CI `test` job runs `uv sync && uv run pytest`.
+
 ### Local development
 
 ```bash
+# Tests (must pass before push)
+uv run pytest
+
 # Python linting (must pass before push)
 ruff check custom_components/
 
