@@ -152,4 +152,4 @@ class DreameCloudMapRotationSelect(DreameCloudEntity, SelectEntity):
         self.hass.config_entries.async_update_entry(
             self.coordinator.config_entry, options=new_options
         )
-        self.async_write_ha_state()
+        self.coordinator.async_map_options_changed()

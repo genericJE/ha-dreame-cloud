@@ -67,21 +67,16 @@ class DreameCloudMapImage(DreameCloudEntity, ImageEntity):
         self._last_render_sig: str | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Register for option updates when added to hass."""
-        await super().async_added_to_hass()
-        self.async_on_remove(
-            self.coordinator.config_entry.add_update_listener(
-                self._async_options_updated
-            )
-        )
+        """Render the cached map before HA writes the first state.
 
-    @staticmethod
-    async def _async_options_updated(
-        hass: HomeAssistant, entry: DreameCloudConfigEntry
-    ) -> None:
-        """Trigger a coordinator update when map options change."""
-        coordinator: DreameCloudCoordinator = entry.runtime_data
-        coordinator.async_set_updated_data(coordinator.data)
+        The coordinator only pushes on its next poll, so without this a
+        restart shows a blank map (image proxy 500) for up to
+        DEFAULT_SCAN_INTERVAL seconds. Orientation option changes arrive
+        through ``coordinator.async_map_options_changed()``, not an entry
+        update listener.
+        """
+        await super().async_added_to_hass()
+        await self._async_render()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -93,7 +88,12 @@ class DreameCloudMapImage(DreameCloudEntity, ImageEntity):
         self.hass.async_create_task(self._async_rerender())
 
     async def _async_rerender(self) -> None:
-        """Re-render the map image and update state if anything changed."""
+        """Re-render the map image and write the new state."""
+        await self._async_render()
+        self.async_write_ha_state()
+
+    async def _async_render(self) -> None:
+        """Re-render the map image if any render input changed."""
         map_data = (
             self.coordinator.data.map_data if self.coordinator.data else None
         )
@@ -119,7 +119,6 @@ class DreameCloudMapImage(DreameCloudEntity, ImageEntity):
             )
             self._last_render_sig = signature
             self._attr_image_last_updated = datetime.now(UTC)
-        self.async_write_ha_state()
 
     def _render_signature(
         self,

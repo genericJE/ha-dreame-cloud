@@ -78,7 +78,7 @@ class _MapFlipSwitch(DreameCloudEntity, SwitchEntity):
         self.hass.config_entries.async_update_entry(
             self.coordinator.config_entry, options=new_options
         )
-        self.async_write_ha_state()
+        self.coordinator.async_map_options_changed()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable flip."""
