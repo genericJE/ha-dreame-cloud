@@ -4,9 +4,9 @@ version = "0.3.12"
 description = "Dreame Cloud Vacuum integration for Home Assistant"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14.2"
 dependencies = [
-    "homeassistant>=2025.1.0",
+    "homeassistant>=2026.5.0",
     "dreame-mocker @ git+ssh://git@github-personal/genericJE/dreame-mocker.git",
     "Pillow>=10.0.0",
     "numpy>=1.26.0",
@@ -52,6 +52,8 @@ ignore = [
     "PLR0911",  # too many return statements
     "PLR0912",  # too many branches
     "PLR0915",  # too many statements
+    "PLR0917",  # too many positional arguments (HA platform/renderer signatures)
+    "CPY001",   # copyright notice header (not used in this project)
 ]
 
 [tool.ruff.lint.isort]
@@ -59,8 +61,7 @@ known-first-party = ["dreame_mocker"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
-pythonVersion = "3.13"
+pythonVersion = "3.14"
 include = ["custom_components"]
-stubPath = "stubs"
 # HA base classes mix property/cached_property — unfixable from integration side
 reportIncompatibleVariableOverride = false
