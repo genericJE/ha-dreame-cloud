@@ -217,11 +217,6 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         return STATE_MAP.get(self.coordinator.data.status.state)
 
     @property
-    def battery_level(self) -> int | None:
-        """Return the battery level."""
-        return self.coordinator.data.status.battery
-
-    @property
     def fan_speed(self) -> str | None:
         """Return the current fan speed."""
         return SUCTION_TO_FAN_SPEED.get(
