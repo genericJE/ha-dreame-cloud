@@ -3,12 +3,12 @@
   "name": "Dreame Cloud Vacuum",
   "codeowners": ["@genericJE"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["http"],
   "documentation": "https://github.com/genericJE/ha-dreame-cloud",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/genericJE/ha-dreame-cloud/issues",
   "requirements": [
-    "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git@v0.1.4",
+    "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git@v0.1.5",
     "Pillow>=10.0.0",
     "numpy>=1.26.0"
   ],

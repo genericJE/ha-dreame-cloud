@@ -13,7 +13,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+import httpx
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -47,8 +48,25 @@ from .const import (
     MAP_FAST_POLL_INTERVAL_CLEANING,
     OFFLINE_THRESHOLD_SECONDS,
 )
+from .token_store import token_path
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _as_int(values: dict[tuple[int, int], Any], key: Any, default: int) -> int:
+    """``int()`` a property value, treating ``None`` as absent.
+
+    The cloud answers ``value: null`` for properties a model doesn't
+    support; a bare ``int(None)`` would fail the whole update.
+    """
+    val = values.get(key)
+    return default if val is None else int(val)
+
+
+def _as_bool(values: dict[tuple[int, int], Any], key: Any, default: bool) -> bool:
+    """``bool()`` a property value, treating ``None`` as absent."""
+    val = values.get(key)
+    return default if val is None else bool(val)
 
 
 @dataclass
@@ -102,6 +120,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             region=region,
             host=host,
             port=port,
+            token_path=token_path(hass, username),
         )
         self._device: DreameDevice | None = None
         self._map_data: DreameMap | None = None
@@ -310,8 +329,20 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             > OFFLINE_THRESHOLD_SECONDS
         )
 
-    async def _async_setup(self) -> None:
-        """Set up the coordinator — connect and find the device."""
+    def _can_run_offline(self) -> bool:
+        """Return True when cached data lets the entities exist without the cloud."""
+        return self._last_good_data is not None and (
+            self._device is not None or self._cached_device_id is not None
+        )
+
+    async def _async_connect(self) -> None:
+        """Connect to the cloud and resolve the device.
+
+        Deliberately not named ``_async_setup``: that is a
+        DataUpdateCoordinator hook HA runs itself during the first refresh,
+        outside the offline-cache handling below, so a cold start with the
+        cloud down would never reach the cached map.
+        """
         try:
             async with asyncio.timeout(30):
                 await self._cloud.connect()
@@ -322,17 +353,24 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             raise UpdateFailed("Connection to Dreame cloud timed out") from err
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
-        except DreameError as err:
+        except (DreameError, httpx.HTTPError) as err:
+            # dreame-mocker lets httpx transport errors (DNS, refused,
+            # reset) escape unwrapped.
             raise UpdateFailed(f"Failed to connect: {err}") from err
 
     async def _async_update_data(self) -> DreameCloudData:
         """Fetch data from the device."""
         if not self._connected:
             try:
-                await self._async_setup()
+                await self._async_connect()
             except ConfigEntryAuthFailed:
                 raise
             except UpdateFailed:
+                if not self._can_run_offline():
+                    # Nothing to show: no cache and never connected. Let HA
+                    # retry setup rather than create entities with no
+                    # device identity.
+                    raise
                 if self._should_surface_offline():
                     _LOGGER.debug(
                         "Reconnect failed past threshold; surfacing Offline"
@@ -380,17 +418,17 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 key = (prop.get("siid", 0), prop.get("piid", 0))
                 values[key] = prop.get("value", 0)
 
-            state = int(values.get(Property.STATE, 0))
+            state = _as_int(values, Property.STATE, 0)
             status = DeviceStatus(
                 state=state,
                 state_name=STATES.get(state, str(state)),
-                battery=int(values.get(Property.BATTERY_LEVEL, 0)),
-                error=int(values.get(Property.ERROR, 0)),
-                suction_level=int(values.get(Property.SUCTION_LEVEL, 0)),
-                water_volume=int(values.get(Property.WATER_VOLUME, 0)),
-                cleaning_mode=int(values.get(Property.CLEANING_MODE, 0)),
-                cleaning_time=int(values.get(Property.CLEANING_TIME, 0)),
-                cleaning_area=int(values.get(Property.CLEANING_AREA, 0)),
+                battery=_as_int(values, Property.BATTERY_LEVEL, 0),
+                error=_as_int(values, Property.ERROR, 0),
+                suction_level=_as_int(values, Property.SUCTION_LEVEL, 0),
+                water_volume=_as_int(values, Property.WATER_VOLUME, 0),
+                cleaning_mode=_as_int(values, Property.CLEANING_MODE, 0),
+                cleaning_time=_as_int(values, Property.CLEANING_TIME, 0),
+                cleaning_area=_as_int(values, Property.CLEANING_AREA, 0),
             )
 
             consumables: dict[str, int] = {}
@@ -404,26 +442,18 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                 if val is not None:
                     consumables[name] = int(val)
 
-            dnd_enabled = bool(values.get(Property.DND_ENABLED, False))
-            volume = int(values.get(Property.VOLUME, 50))
+            dnd_enabled = _as_bool(values, Property.DND_ENABLED, False)
+            volume = _as_int(values, Property.VOLUME, 50)
 
-            self_clean = bool(values.get(Property.SELF_CLEAN, 1))
-            auto_water_refilling = bool(
-                values.get(Property.AUTO_WATER_REFILLING, 1),
-            )
-            auto_mount_mop = bool(values.get(Property.AUTO_MOUNT_MOP, 1))
-            intelligent_recognition = bool(
-                values.get(Property.INTELLIGENT_RECOGNITION, 1),
-            )
-            mop_wash_level = int(values.get(Property.MOP_WASH_LEVEL, 1))
-            mop_in_station = bool(values.get(Property.MOP_IN_STATION, False))
-            mop_pad_installed = bool(
-                values.get(Property.MOP_PAD_INSTALLED, False),
-            )
-            customized_cleaning = bool(
-                values.get(Property.CUSTOMIZED_CLEANING, False),
-            )
-            low_water_warning = int(values.get(LOW_WATER_WARNING, 0))
+            self_clean = _as_bool(values, Property.SELF_CLEAN, True)
+            auto_water_refilling = _as_bool(values, Property.AUTO_WATER_REFILLING, True)
+            auto_mount_mop = _as_bool(values, Property.AUTO_MOUNT_MOP, True)
+            intelligent_recognition = _as_bool(values, Property.INTELLIGENT_RECOGNITION, True)
+            mop_wash_level = _as_int(values, Property.MOP_WASH_LEVEL, 1)
+            mop_in_station = _as_bool(values, Property.MOP_IN_STATION, False)
+            mop_pad_installed = _as_bool(values, Property.MOP_PAD_INSTALLED, False)
+            customized_cleaning = _as_bool(values, Property.CUSTOMIZED_CLEANING, False)
+            low_water_warning = _as_int(values, LOW_WATER_WARNING, 0)
 
             is_cleaning = status.state in (
                 DeviceState.SWEEPING,
@@ -444,7 +474,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
                     self._last_map_update = time.monotonic()
                     self._seeded_this_connect = True
                     await self._async_save_map_cache(self._map_data)
-                except (DreameError, TimeoutError):
+                except (DreameError, httpx.HTTPError, TimeoutError):
                     _LOGGER.debug("Initial map fetch failed")
 
             # Toggle the fast map poll loop based on cleaning state.
@@ -512,6 +542,18 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     def set_map_data(self, map_data: DreameMap) -> None:
         """Replace the cached map data (used by request_map for investigation)."""
         self._map_data = map_data
+
+    @callback
+    def async_map_options_changed(self) -> None:
+        """Repaint the map after a rotation/flip option changed.
+
+        Pushes the current data unchanged so the image entity re-reads
+        ``config_entry.options``. This replaces a config entry update
+        listener on purpose: HA 2026.12 turns "update listener plus
+        ``async_update_reload_and_abort``" (which the reauth flow uses) into
+        an error.
+        """
+        self.async_set_updated_data(self.data)
 
     def current_cleanset(self) -> str | dict[str, Any] | None:
         """Return the best-available stored ``cleanset`` (live frame, then rism).
@@ -593,6 +635,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             self.hass,
             self._async_fast_map_tick,
             timedelta(seconds=MAP_FAST_POLL_INTERVAL_CLEANING),
+            cancel_on_shutdown=True,
         )
 
     def _stop_fast_map_poll(self) -> None:
