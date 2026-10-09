@@ -39,10 +39,19 @@ WETNESS_MIN = 1
 WETNESS_MAX = 32
 WETNESS_DEFAULT = 16
 
+# Per-room cleaning passes ("Cleaning times" in the Dreame app).
+CLEANING_TIMES_MIN = 1
+CLEANING_TIMES_MAX = 3
+
 
 def clamp_wetness(wetness: int) -> int:
     """Clamp a wetness value into the valid 1-32 range."""
     return max(WETNESS_MIN, min(WETNESS_MAX, int(wetness)))
+
+
+def clamp_cleaning_times(cleaning_times: int) -> int:
+    """Clamp a cleaning-times value into the valid 1-3 range."""
+    return max(CLEANING_TIMES_MIN, min(CLEANING_TIMES_MAX, int(cleaning_times)))
 
 
 @dataclass
@@ -172,5 +181,26 @@ def apply_wetness(
             seg.wetness = value
             if len(seg.raw) > 1:
                 seg.raw[1] = value
+            updated.append(seg.segment_id)
+    return updated
+
+
+def apply_cleaning_times(
+    segments: dict[int, SegmentCleanset],
+    segment_ids: Iterable[int],
+    cleaning_times: int,
+) -> list[int]:
+    """Set ``cleaning_times`` (clamped) on the given segments in place.
+
+    Returns the segment ids that were actually present and updated.
+    """
+    value = clamp_cleaning_times(cleaning_times)
+    updated: list[int] = []
+    for seg_id in segment_ids:
+        seg = segments.get(int(seg_id))
+        if seg is not None:
+            seg.cleaning_times = value
+            if len(seg.raw) > 2:
+                seg.raw[2] = value
             updated.append(seg.segment_id)
     return updated

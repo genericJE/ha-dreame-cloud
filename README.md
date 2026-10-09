@@ -121,6 +121,41 @@ data:
 
 Room segment IDs are available in the vacuum entity's `rooms` state attribute.
 
+> With the **Customized Cleaning** switch on, the robot uses each room's stored
+> per-room settings (mop wetness, cleaning times, mode) from the saved map and
+> ignores `water_volume` and `repeat` sent here. Change the stored values with
+> the two services below.
+
+### `dreame_cloud.set_segment_wetness`
+
+Set the per-room mop wetness stored in the saved map (the Dreame app's per-room
+Mop Wetness slider). Applies to every subsequent clean of those rooms.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `segments` | list[int] | required | Room segment IDs to update |
+| `wetness` | int (1-32) | required | 1=slightly dry … 32=wet |
+
+### `dreame_cloud.set_segment_cleaning_times`
+
+Set the per-room number of cleaning passes stored in the saved map (the Dreame
+app's per-room Cleaning Times setting). Applies to every subsequent clean of
+those rooms.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `segments` | list[int] | required | Room segment IDs to update |
+| `cleaning_times` | int (1-3) | required | Passes per room |
+
+```yaml
+service: dreame_cloud.set_segment_cleaning_times
+target:
+  entity_id: vacuum.x50_ultra_complete_vacuum
+data:
+  segments: [1, 2, 3, 4, 8]
+  cleaning_times: 1
+```
+
 ## Architecture
 
 ```

@@ -296,6 +296,7 @@ The pending overlay is necessary because the cloud's `rism` blob updates lazily 
 Custom services registered on the vacuum platform:
 - `dreame_cloud.clean_segment` (room IDs + settings)
 - `dreame_cloud.clean_zone` (coordinate rectangles + settings)
+- `dreame_cloud.set_segment_wetness` / `dreame_cloud.set_segment_cleaning_times` (persist per-room mop wetness 1-32 / cleaning passes 1-3 into the saved-map `cleanset` via a `customeClean` map-update write; both go through `coordinator._async_write_cleanset`. With Customized Cleaning on, the firmware uses these stored values and ignores the `water_volume`/`repeat` fields of `clean_segment`.)
 - `dreame_cloud.goto` (x, y vacuum coords; uses spot cleaning at target point)
 - `dreame_cloud.update_map` (no-go zones, virtual walls, low-clearance zones, thresholds)
 - `dreame_cloud.request_map` (req_type parameter for investigation; logs metadata keys)

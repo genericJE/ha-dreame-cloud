@@ -8,6 +8,7 @@ import dataclasses
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -36,6 +37,8 @@ from dreame_mocker.client.map_decoder import MapDecoder
 from dreame_mocker.const import STATES, DeviceState, Property
 
 from .cleanset import (
+    SegmentCleanset,
+    apply_cleaning_times,
     apply_wetness,
     parse_cleanset,
     to_custome_clean,
@@ -581,22 +584,64 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     ) -> list[int]:
         """Set per-room mop wetness (1-32) for the given segments.
 
-        Reads the current per-room ``cleanset``, updates the wetness of the
+        Persists into the saved-map ``cleanset`` via :meth:`_async_write_cleanset`
+        so it applies to every subsequent clean of those rooms, matching the
+        per-room Mop Wetness slider in the Dreame app.
+
+        Returns the segment ids that were actually updated.
+        """
+        return await self._async_write_cleanset(
+            "mop wetness",
+            lambda segments: apply_wetness(segments, segment_ids, wetness),
+            segment_ids,
+        )
+
+    async def async_set_segment_cleaning_times(
+        self, segment_ids: list[int], cleaning_times: int,
+    ) -> list[int]:
+        """Set per-room cleaning passes (1-3) for the given segments.
+
+        Persists into the saved-map ``cleanset`` via :meth:`_async_write_cleanset`
+        so it applies to every subsequent clean of those rooms, matching the
+        per-room Cleaning Times setting in the Dreame app. With Customized
+        Cleaning on, the firmware uses this stored value and ignores the
+        ``repeat`` field of ``clean_segment``.
+
+        Returns the segment ids that were actually updated.
+        """
+        return await self._async_write_cleanset(
+            "cleaning times",
+            lambda segments: apply_cleaning_times(
+                segments, segment_ids, cleaning_times,
+            ),
+            segment_ids,
+        )
+
+    async def _async_write_cleanset(
+        self,
+        what: str,
+        apply: Callable[[dict[int, SegmentCleanset]], list[int]],
+        segment_ids: list[int],
+    ) -> list[int]:
+        """Update per-room settings in the saved-map ``cleanset``.
+
+        Reads the current per-room ``cleanset``, lets ``apply`` mutate the
         named segments, and writes the *whole* set back via the map-update
         action (siid 6, aiid 2, piid 4) wrapped under ``customeClean`` — the
         same mechanism the Dreame app uses. The remaining rooms are written
         back unchanged. For the device to honour these values during a clean,
         the ``Customized Cleaning`` switch (siid 4 piid 26) must be on.
 
-        Returns the segment ids that were actually updated.
+        ``what`` names the setting for error and warning messages. Returns
+        the segment ids that were actually updated.
         """
         segments = parse_cleanset(self.current_cleanset())
         if not segments:
             raise HomeAssistantError(
                 "No per-room cleaning data is loaded yet — the robot's map "
-                "must be available before mop wetness can be set.",
+                f"must be available before {what} can be set.",
             )
-        updated = apply_wetness(segments, segment_ids, wetness)
+        updated = apply(segments)
         if not updated:
             raise HomeAssistantError(
                 f"None of segments {list(segment_ids)} exist in the saved map "
@@ -613,9 +658,10 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
 
         if not self.data.customized_cleaning:
             _LOGGER.warning(
-                "Mop wetness updated for rooms %s, but Customized Cleaning is "
-                "off — the robot will keep using the global water level until "
+                "Per-room %s updated for rooms %s, but Customized Cleaning is "
+                "off — the robot will keep using its global settings until "
                 "the Customized Cleaning switch is turned on.",
+                what,
                 updated,
             )
 

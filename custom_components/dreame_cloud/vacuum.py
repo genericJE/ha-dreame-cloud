@@ -107,6 +107,18 @@ async def async_setup_entry(
         },
         "async_set_segment_wetness",
     )
+    register(
+        "set_segment_cleaning_times",
+        {
+            vol.Required("segments"): vol.All(
+                vol.Coerce(list), [vol.Coerce(int)]
+            ),
+            vol.Required("cleaning_times"): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=3)
+            ),
+        },
+        "async_set_segment_cleaning_times",
+    )
     _zone_schema = vol.All(
         vol.Coerce(list),
         [
@@ -347,9 +359,11 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
             piid 1 (STATUS) = 18 (SEGMENT_CLEANING status code)
             piid 10 (CLEANING_PROPERTIES) = json({"selects": [[seg, repeat, suction, water, 1]]})
 
-        ``water_volume`` is the coarse 1-3 level. The robot honours each
-        room's stored per-room mop wetness from the saved-map cleanset when
-        Customized Cleaning is on (set it with ``set_segment_wetness``).
+        ``water_volume`` is the coarse 1-3 level. When Customized Cleaning
+        is on the robot honours each room's stored per-room mop wetness and
+        cleaning times from the saved-map cleanset instead of the values sent
+        here (set them with ``set_segment_wetness`` and
+        ``set_segment_cleaning_times``).
         """
         if not segments:
             return
@@ -388,6 +402,26 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         if not segments:
             return
         await self.coordinator.async_set_segment_wetness(segments, wetness)
+
+    async def async_set_segment_cleaning_times(
+        self,
+        segments: list[int] | None = None,
+        cleaning_times: int = 1,
+        **kwargs: Any,
+    ) -> None:
+        """Set the per-room cleaning passes (1-3) for one or more rooms.
+
+        Persists the value into the saved-map ``cleanset`` so it applies to
+        every subsequent clean of that room, matching the per-room Cleaning
+        Times setting in the Dreame app. With the ``Customized Cleaning``
+        switch on the firmware uses this stored value and ignores the
+        ``repeat`` field of ``clean_segment``.
+        """
+        if not segments:
+            return
+        await self.coordinator.async_set_segment_cleaning_times(
+            segments, cleaning_times,
+        )
 
     async def async_update_map(
         self,
