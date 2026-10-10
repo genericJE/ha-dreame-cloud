@@ -10,14 +10,13 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
-from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 if TYPE_CHECKING:
@@ -55,6 +54,56 @@ from .token_store import token_path
 
 _LOGGER = logging.getLogger(__name__)
 
+CLEANING_STATES = frozenset({
+    DeviceState.SWEEPING,
+    DeviceState.MOPPING,
+    DeviceState.SWEEP_AND_MOP,
+})
+
+# While cleaning the coordinator ticks every MAP_FAST_POLL_INTERVAL_CLEANING
+# seconds for the map and refreshes the properties every this many ticks, so
+# the property RPC rate stays at one per DEFAULT_SCAN_INTERVAL.
+FAST_TICKS_PER_PROPERTY_POLL = DEFAULT_SCAN_INTERVAL // MAP_FAST_POLL_INTERVAL_CLEANING
+
+OFFLINE_STATUS = DeviceStatus(
+    state=0, state_name="Offline", battery=0, error=0,
+    suction_level=0, water_volume=0, cleaning_mode=0,
+    cleaning_time=0, cleaning_area=0,
+)
+
+POLLED_PROPERTIES: list[Any] = [
+    Property.STATE,
+    Property.BATTERY_LEVEL,
+    Property.ERROR,
+    Property.SUCTION_LEVEL,
+    Property.WATER_VOLUME,
+    Property.CLEANING_MODE,
+    Property.CLEANING_TIME,
+    Property.CLEANING_AREA,
+    Property.MAIN_BRUSH_LIFE_LEVEL,
+    Property.SIDE_BRUSH_LIFE_LEVEL,
+    Property.FILTER_LIFE_LEVEL,
+    Property.MOP_PAD_LIFE_LEVEL,
+    Property.DND_ENABLED,
+    Property.VOLUME,
+    Property.SELF_CLEAN,
+    Property.AUTO_WATER_REFILLING,
+    Property.AUTO_MOUNT_MOP,
+    Property.INTELLIGENT_RECOGNITION,
+    Property.MOP_WASH_LEVEL,
+    Property.MOP_IN_STATION,
+    Property.MOP_PAD_INSTALLED,
+    Property.CUSTOMIZED_CLEANING,
+    LOW_WATER_WARNING,
+]
+
+CONSUMABLE_PROPERTIES: dict[str, Any] = {
+    "main_brush": Property.MAIN_BRUSH_LIFE_LEVEL,
+    "side_brush": Property.SIDE_BRUSH_LIFE_LEVEL,
+    "filter": Property.FILTER_LIFE_LEVEL,
+    "mop_pad": Property.MOP_PAD_LIFE_LEVEL,
+}
+
 
 def _as_int(values: dict[tuple[int, int], Any], key: Any, default: int) -> int:
     """``int()`` a property value, treating ``None`` as absent.
@@ -70,6 +119,15 @@ def _as_bool(values: dict[tuple[int, int], Any], key: Any, default: bool) -> boo
     """``bool()`` a property value, treating ``None`` as absent."""
     val = values.get(key)
     return default if val is None else bool(val)
+
+
+@dataclass(frozen=True)
+class DeviceIdentity:
+    """What the entities need to exist, available live or from the cache."""
+
+    model: str
+    name: str
+    did: str
 
 
 @dataclass
@@ -93,9 +151,59 @@ class DreameCloudData:
     # Onboard clean-water low-level warning (siid 4 piid 41); 0 = OK.
     low_water_warning: int = 0
 
+    @property
+    def is_cleaning(self) -> bool:
+        """True while the robot is actively sweeping and/or mopping."""
+        return self.status.state in CLEANING_STATES
+
+
+def _parse_properties(props: list[dict[str, Any]]) -> DreameCloudData:
+    """Turn one ``get_properties`` answer into a payload (without the map)."""
+    values: dict[tuple[int, int], Any] = {
+        (p.get("siid", 0), p.get("piid", 0)): p.get("value", 0) for p in props
+    }
+    state = _as_int(values, Property.STATE, 0)
+    return DreameCloudData(
+        status=DeviceStatus(
+            state=state,
+            state_name=STATES.get(state, str(state)),
+            battery=_as_int(values, Property.BATTERY_LEVEL, 0),
+            error=_as_int(values, Property.ERROR, 0),
+            suction_level=_as_int(values, Property.SUCTION_LEVEL, 0),
+            water_volume=_as_int(values, Property.WATER_VOLUME, 0),
+            cleaning_mode=_as_int(values, Property.CLEANING_MODE, 0),
+            cleaning_time=_as_int(values, Property.CLEANING_TIME, 0),
+            cleaning_area=_as_int(values, Property.CLEANING_AREA, 0),
+        ),
+        consumables={
+            name: int(values[key])
+            for name, key in CONSUMABLE_PROPERTIES.items()
+            if values.get(key) is not None
+        },
+        dnd_enabled=_as_bool(values, Property.DND_ENABLED, False),
+        volume=_as_int(values, Property.VOLUME, 50),
+        self_clean=_as_bool(values, Property.SELF_CLEAN, True),
+        auto_water_refilling=_as_bool(values, Property.AUTO_WATER_REFILLING, True),
+        auto_mount_mop=_as_bool(values, Property.AUTO_MOUNT_MOP, True),
+        intelligent_recognition=_as_bool(values, Property.INTELLIGENT_RECOGNITION, True),
+        mop_wash_level=_as_int(values, Property.MOP_WASH_LEVEL, 1),
+        mop_in_station=_as_bool(values, Property.MOP_IN_STATION, False),
+        mop_pad_installed=_as_bool(values, Property.MOP_PAD_INSTALLED, False),
+        customized_cleaning=_as_bool(values, Property.CUSTOMIZED_CLEANING, False),
+        low_water_warning=_as_int(values, LOW_WATER_WARNING, 0),
+    )
+
 
 class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
-    """Coordinate data updates from Dreame cloud."""
+    """Coordinate data updates from Dreame cloud.
+
+    One scheduled loop does everything. Idle, it ticks every
+    ``DEFAULT_SCAN_INTERVAL`` seconds and fetches the properties. While the
+    robot cleans, ``update_interval`` drops to
+    ``MAP_FAST_POLL_INTERVAL_CLEANING`` so the map follows the robot, and the
+    properties are refreshed every ``FAST_TICKS_PER_PROPERTY_POLL`` ticks or
+    whenever a refresh is requested (entity commands, ``update_entity``).
+    """
 
     config_entry: DreameCloudConfigEntry
 
@@ -126,17 +234,19 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             token_path=token_path(hass, username),
         )
         self._device: DreameDevice | None = None
-        self._map_data: DreameMap | None = None
-        self._last_map_update: float = 0
+        self._identity: DeviceIdentity | None = None
         self._connected = False
+        self._map_data: DreameMap | None = None
+        self._map_current = False  # a live map was fetched since (re)connecting
         self._pending_zone_update: dict[str, Any] | None = None
         self._last_good_data: DreameCloudData | None = None
         self._last_successful_update: float = 0.0
-        self._cached_device_model: str | None = None
-        self._cached_device_name: str | None = None
-        self._cached_device_id: str | None = None
-        self._fast_map_unsub: CALLBACK_TYPE | None = None
-        self._seeded_this_connect: bool = False
+        self._properties_due = True
+        self._fast_ticks = 0
+
+    # ------------------------------------------------------------------
+    # Device identity
+    # ------------------------------------------------------------------
 
     @property
     def device(self) -> DreameDevice:
@@ -145,32 +255,29 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             raise RuntimeError("Device not initialized; coordinator setup has not completed")
         return self._device
 
+    def _require_identity(self) -> DeviceIdentity:
+        if self._identity is None:
+            raise RuntimeError("Device not initialized and no cache available")
+        return self._identity
+
     @property
     def device_model(self) -> str:
         """Return device model."""
-        if self._device is not None:
-            return self._device.model
-        if self._cached_device_model is not None:
-            return self._cached_device_model
-        raise RuntimeError("Device not initialized and no cache available")
+        return self._require_identity().model
 
     @property
     def device_name(self) -> str:
         """Return device name."""
-        if self._device is not None:
-            return self._device.name
-        if self._cached_device_name is not None:
-            return self._cached_device_name
-        raise RuntimeError("Device not initialized and no cache available")
+        return self._require_identity().name
 
     @property
     def device_id(self) -> str:
         """Return device ID."""
-        if self._device is not None:
-            return self._device.did
-        if self._cached_device_id is not None:
-            return self._cached_device_id
-        raise RuntimeError("Device not initialized and no cache available")
+        return self._require_identity().did
+
+    # ------------------------------------------------------------------
+    # Offline map cache
+    # ------------------------------------------------------------------
 
     @property
     def _cache_path(self) -> Path:
@@ -178,34 +285,22 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         return Path(self.hass.config.path(".storage/dreame_cloud_map_cache.json"))
 
     async def async_load_map_cache(self) -> None:
-        """Load the cached map and device info from disk (called before first refresh)."""
+        """Load the cached map and device identity from disk (before the first refresh)."""
         path = self._cache_path
         try:
             result = await self.hass.async_add_executor_job(self._read_map_cache, path)
-        except (OSError, json.JSONDecodeError, KeyError, ValueError):
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError):
             _LOGGER.debug("No usable map cache at %s", path)
             return
         if result is None:
             return
-        map_data, device_info = result
-        self._map_data = map_data
-        self._last_good_data = DreameCloudData(
-            status=DeviceStatus(
-                state=0, state_name="Offline", battery=0, error=0,
-                suction_level=0, water_volume=0, cleaning_mode=0,
-                cleaning_time=0, cleaning_area=0,
-            ),
-            map_data=map_data,
-        )
-        if device_info:
-            self._cached_device_model = device_info.get("model")
-            self._cached_device_name = device_info.get("name")
-            self._cached_device_id = device_info.get("did")
+        self._map_data, self._identity = result
+        self._last_good_data = DreameCloudData(status=OFFLINE_STATUS, map_data=self._map_data)
         _LOGGER.info("Loaded cached map from disk (%s)", path)
 
     @staticmethod
-    def _read_map_cache(path: Path) -> tuple[DreameMap, dict[str, str]] | None:
-        """Deserialize a DreameMap and device info from a JSON cache file."""
+    def _read_map_cache(path: Path) -> tuple[DreameMap, DeviceIdentity | None] | None:
+        """Deserialize a DreameMap and device identity from a JSON cache file."""
         if not path.is_file():
             return None
         raw = json.loads(path.read_text())
@@ -240,39 +335,28 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         # the dock's saved coordinates when the live header carries the
         # firmware's "I'm asleep" sentinel positions (32766/32767), and so
         # _compute_room_bboxes can group live pixel-grid IDs by rism ID.
-        # Without this, restarting from cache renders the map with no
-        # robot/charger marker and only the live IDs that coincidentally
-        # fall within the rism ID range.
         rism_b64 = metadata.get("rism")
         m.rism = MapDecoder._decode_rism(rism_b64) if rism_b64 else None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
-        device_info: dict[str, str] = raw.get("device", {})
-        return m, device_info
+        device: dict[str, str] = raw.get("device", {})
+        identity = DeviceIdentity(**device) if device.keys() >= {"model", "name", "did"} else None
+        return m, identity
 
     def _write_map_cache(self, map_data: DreameMap) -> None:
-        """Serialize a DreameMap and device info to the JSON cache file."""
+        """Serialize a DreameMap and device identity to the JSON cache file."""
         h = map_data.header
-        header_dict = {k: v for k, v in vars(h).items() if not k.startswith("_")}
-        # RoomInfo is a dataclass; convert each entry to a dict so json.dumps
-        # works. Pre-rism-fallback (dreame-mocker <0.1.2) this dict was always
-        # empty, so the previous direct json.dumps happened to succeed.
-        # Rooms loaded from a pre-v0.3.6 cache may still be opaque values.
         rooms: dict[int, Any] = map_data.rooms
-        rooms_serializable: dict[int, Any] = {
-            k: dataclasses.asdict(v) if isinstance(v, RoomInfo) else v
-            for k, v in rooms.items()
-        }
         payload: dict[str, Any] = {
-            "header": header_dict,
+            "header": {k: v for k, v in vars(h).items() if not k.startswith("_")},
             "pixels": base64.b64encode(map_data.pixels).decode(),
-            "rooms": rooms_serializable,
+            # RoomInfo is a dataclass; pre-v0.3.6 caches may hold opaque values.
+            "rooms": {
+                k: dataclasses.asdict(v) if isinstance(v, RoomInfo) else v
+                for k, v in rooms.items()
+            },
             "metadata": map_data.raw_metadata,
         }
-        if self._device is not None:
-            payload["device"] = {
-                "model": self._device.model,
-                "name": self._device.name,
-                "did": self._device.did,
-            }
+        if self._identity is not None:
+            payload["device"] = dataclasses.asdict(self._identity)
         path = self._cache_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload))
@@ -284,62 +368,9 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         except OSError:
             _LOGGER.warning("Failed to write map cache to %s", self._cache_path)
 
-    def _build_offline_data(self) -> DreameCloudData:
-        """Synthesize a DreameCloudData payload for an unreachable device.
-
-        Volatile fields (battery, cleaning time/area) are zeroed because they
-        cannot be trusted while the device is offline. Map and consumables
-        survive — they don't change while the device is offline, and the user
-        wants the map to keep rendering even if status is unknown.
-        """
-        consumables: dict[str, int] = {}
-        dnd_enabled = False
-        volume = 50
-        prefs: dict[str, Any] = {
-            "self_clean": True,
-            "auto_water_refilling": True,
-            "auto_mount_mop": True,
-            "intelligent_recognition": True,
-            "mop_wash_level": 1,
-            "mop_in_station": True,
-            "mop_pad_installed": True,
-            "customized_cleaning": False,
-        }
-        if self._last_good_data is not None:
-            consumables = dict(self._last_good_data.consumables)
-            dnd_enabled = self._last_good_data.dnd_enabled
-            volume = self._last_good_data.volume
-            for k in prefs:
-                prefs[k] = getattr(self._last_good_data, k)
-        return DreameCloudData(
-            status=DeviceStatus(
-                state=0, state_name="Offline", battery=0, error=0,
-                suction_level=0, water_volume=0, cleaning_mode=0,
-                cleaning_time=0, cleaning_area=0,
-            ),
-            map_data=self._map_data,
-            consumables=consumables,
-            dnd_enabled=dnd_enabled,
-            volume=volume,
-            **prefs,
-        )
-
-    def _should_surface_offline(self) -> bool:
-        """Return True once the device has been unreachable past the threshold."""
-        if self._last_successful_update == 0.0:
-            # Never had a successful update this session — surface Offline
-            # immediately rather than masking with stale cache data.
-            return True
-        return (
-            time.monotonic() - self._last_successful_update
-            > OFFLINE_THRESHOLD_SECONDS
-        )
-
-    def _can_run_offline(self) -> bool:
-        """Return True when cached data lets the entities exist without the cloud."""
-        return self._last_good_data is not None and (
-            self._device is not None or self._cached_device_id is not None
-        )
+    # ------------------------------------------------------------------
+    # Polling
+    # ------------------------------------------------------------------
 
     async def _async_connect(self) -> None:
         """Connect to the cloud and resolve the device.
@@ -352,9 +383,7 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         try:
             async with asyncio.timeout(30):
                 await self._cloud.connect()
-                self._device = await self._cloud.get_device()
-            self._connected = True
-            self._seeded_this_connect = False
+                device = await self._cloud.get_device()
         except TimeoutError as err:
             raise UpdateFailed("Connection to Dreame cloud timed out") from err
         except AuthenticationError as err:
@@ -363,170 +392,107 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             # dreame-mocker lets httpx transport errors (DNS, refused,
             # reset) escape unwrapped.
             raise UpdateFailed(f"Failed to connect: {err}") from err
+        self._device = device
+        self._identity = DeviceIdentity(device.model, device.name, device.did)
+        self._connected = True
+        self._map_current = False
+        self._properties_due = True
 
     async def _async_update_data(self) -> DreameCloudData:
-        """Fetch data from the device."""
-        if not self._connected:
-            try:
-                await self._async_connect()
-            except ConfigEntryAuthFailed:
-                raise
-            except UpdateFailed:
-                if not self._can_run_offline():
-                    # Nothing to show: no cache and never connected. Let HA
-                    # retry setup rather than create entities with no
-                    # device identity.
-                    raise
-                if self._should_surface_offline():
-                    _LOGGER.debug(
-                        "Reconnect failed past threshold; surfacing Offline"
-                    )
-                    return self._build_offline_data()
-                if self._last_good_data is not None:
-                    _LOGGER.debug(
-                        "Reconnect failed; returning cached data (within "
-                        "blip-tolerance window)"
-                    )
-                    return self._last_good_data
-                raise
-
+        """One tick of the single polling loop."""
         try:
-            # Single RPC call for all properties (status + consumables + extras).
-            all_props = await self.device.get_properties([
-                Property.STATE,
-                Property.BATTERY_LEVEL,
-                Property.ERROR,
-                Property.SUCTION_LEVEL,
-                Property.WATER_VOLUME,
-                Property.CLEANING_MODE,
-                Property.CLEANING_TIME,
-                Property.CLEANING_AREA,
-                Property.MAIN_BRUSH_LIFE_LEVEL,
-                Property.SIDE_BRUSH_LIFE_LEVEL,
-                Property.FILTER_LIFE_LEVEL,
-                Property.MOP_PAD_LIFE_LEVEL,
-                Property.DND_ENABLED,
-                Property.VOLUME,
-                Property.SELF_CLEAN,
-                Property.AUTO_WATER_REFILLING,
-                Property.AUTO_MOUNT_MOP,
-                Property.INTELLIGENT_RECOGNITION,
-                Property.MOP_WASH_LEVEL,
-                Property.MOP_IN_STATION,
-                Property.MOP_PAD_INSTALLED,
-                Property.CUSTOMIZED_CLEANING,
-                LOW_WATER_WARNING,
-            ])
-
-            # Index results by (siid, piid) for easy lookup.
-            values: dict[tuple[int, int], Any] = {}
-            for prop in all_props:
-                key = (prop.get("siid", 0), prop.get("piid", 0))
-                values[key] = prop.get("value", 0)
-
-            state = _as_int(values, Property.STATE, 0)
-            status = DeviceStatus(
-                state=state,
-                state_name=STATES.get(state, str(state)),
-                battery=_as_int(values, Property.BATTERY_LEVEL, 0),
-                error=_as_int(values, Property.ERROR, 0),
-                suction_level=_as_int(values, Property.SUCTION_LEVEL, 0),
-                water_volume=_as_int(values, Property.WATER_VOLUME, 0),
-                cleaning_mode=_as_int(values, Property.CLEANING_MODE, 0),
-                cleaning_time=_as_int(values, Property.CLEANING_TIME, 0),
-                cleaning_area=_as_int(values, Property.CLEANING_AREA, 0),
-            )
-
-            consumables: dict[str, int] = {}
-            for prop_key, name in (
-                (Property.MAIN_BRUSH_LIFE_LEVEL, "main_brush"),
-                (Property.SIDE_BRUSH_LIFE_LEVEL, "side_brush"),
-                (Property.FILTER_LIFE_LEVEL, "filter"),
-                (Property.MOP_PAD_LIFE_LEVEL, "mop_pad"),
-            ):
-                val = values.get(prop_key)
-                if val is not None:
-                    consumables[name] = int(val)
-
-            dnd_enabled = _as_bool(values, Property.DND_ENABLED, False)
-            volume = _as_int(values, Property.VOLUME, 50)
-
-            self_clean = _as_bool(values, Property.SELF_CLEAN, True)
-            auto_water_refilling = _as_bool(values, Property.AUTO_WATER_REFILLING, True)
-            auto_mount_mop = _as_bool(values, Property.AUTO_MOUNT_MOP, True)
-            intelligent_recognition = _as_bool(values, Property.INTELLIGENT_RECOGNITION, True)
-            mop_wash_level = _as_int(values, Property.MOP_WASH_LEVEL, 1)
-            mop_in_station = _as_bool(values, Property.MOP_IN_STATION, False)
-            mop_pad_installed = _as_bool(values, Property.MOP_PAD_INSTALLED, False)
-            customized_cleaning = _as_bool(values, Property.CUSTOMIZED_CLEANING, False)
-            low_water_warning = _as_int(values, LOW_WATER_WARNING, 0)
-
-            is_cleaning = status.state in (
-                DeviceState.SWEEPING,
-                DeviceState.MOPPING,
-                DeviceState.SWEEP_AND_MOP,
-            )
-
-            # Seed the map once per connect.  After that the fast
-            # poll loop refreshes it while cleaning, and we leave it
-            # alone while the robot is dormant.  Note: we don't gate
-            # this on `_map_data is None` because the disk cache may
-            # have already populated it; we still want a live fetch
-            # the first time we successfully reach the cloud.
-            if not self._seeded_this_connect:
-                try:
-                    async with asyncio.timeout(15):
-                        self._map_data = await self.device.get_map()
-                    self._last_map_update = time.monotonic()
-                    self._seeded_this_connect = True
-                    await self._async_save_map_cache(self._map_data)
-                except (DreameError, httpx.HTTPError, TimeoutError):
-                    _LOGGER.debug("Initial map fetch failed")
-
-            # Toggle the fast map poll loop based on cleaning state.
-            if is_cleaning:
-                self._start_fast_map_poll()
-            else:
-                self._stop_fast_map_poll()
-
-            data = DreameCloudData(
-                status=status,
-                map_data=self._map_data,
-                consumables=consumables,
-                dnd_enabled=dnd_enabled,
-                volume=volume,
-                self_clean=self_clean,
-                auto_water_refilling=auto_water_refilling,
-                auto_mount_mop=auto_mount_mop,
-                intelligent_recognition=intelligent_recognition,
-                mop_wash_level=mop_wash_level,
-                mop_in_station=mop_in_station,
-                mop_pad_installed=mop_pad_installed,
-                customized_cleaning=customized_cleaning,
-                low_water_warning=low_water_warning,
-            )
+            if not self._connected:
+                await self._async_connect()
+            data = await self._async_poll()
+        except ConfigEntryAuthFailed:
+            raise
         except AuthenticationError as err:
             self._connected = False
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
-        except Exception as err:
-            self._connected = False
-            if self._should_surface_offline():
-                _LOGGER.debug(
-                    "Update failed past threshold; surfacing Offline: %s", err,
-                )
-                return self._build_offline_data()
-            if self._last_good_data is not None:
-                _LOGGER.debug(
-                    "Update failed; returning cached data (within "
-                    "blip-tolerance window): %s",
-                    err,
-                )
-                return self._last_good_data
-            raise UpdateFailed(f"Update failed: {err}") from err
+        except Exception as err:  # any cloud failure means "unreachable"
+            return self._unreachable(err)
+        self._last_good_data = data
+        self._last_successful_update = time.monotonic()
+        return data
+
+    async def _async_poll(self) -> DreameCloudData:
+        """Fetch the properties when due and the map while cleaning."""
+        self._fast_ticks += 1
+        if (
+            self._properties_due
+            or not self.data.is_cleaning
+            or self._fast_ticks >= FAST_TICKS_PER_PROPERTY_POLL
+        ):
+            data = _parse_properties(await self.device.get_properties(POLLED_PROPERTIES))
+            self._properties_due = False
+            self._fast_ticks = 0
         else:
-            self._last_good_data = data
-            self._last_successful_update = time.monotonic()
-            return data
+            data = self.data
+
+        if data.is_cleaning or not self._map_current:
+            await self._async_fetch_map()
+        self.update_interval = timedelta(
+            seconds=MAP_FAST_POLL_INTERVAL_CLEANING if data.is_cleaning else DEFAULT_SCAN_INTERVAL,
+        )
+        return dataclasses.replace(data, map_data=self._map_data)
+
+    async def _async_fetch_map(self) -> None:
+        """Fetch the live map; a bad frame is logged, never fatal for the tick."""
+        try:
+            async with asyncio.timeout(15):
+                self._map_data = await self.device.get_map()
+        except Exception as err:  # decoder errors included
+            _LOGGER.debug("Map fetch failed: %s", err)
+            return
+        self._map_current = True
+        await self._async_save_map_cache(self._map_data)
+
+    def _unreachable(self, err: Exception) -> DreameCloudData:
+        """Ride out a short blip on the last payload, then surface Offline.
+
+        Raises ``UpdateFailed`` when there is nothing to show: no cache and
+        never connected. HA then retries setup rather than creating entities
+        with no device identity.
+        """
+        self._connected = False
+        # Back off to the idle cadence; a 2 s reconnect loop would hammer the cloud.
+        self.update_interval = timedelta(seconds=DEFAULT_SCAN_INTERVAL)
+        if self._last_good_data is None or self._identity is None:
+            raise UpdateFailed(f"Update failed: {err}") from err
+        if (
+            self._last_successful_update
+            and time.monotonic() - self._last_successful_update <= OFFLINE_THRESHOLD_SECONDS
+        ):
+            _LOGGER.debug("Update failed; keeping last data within the blip window: %s", err)
+            return self._last_good_data
+        _LOGGER.debug("Update failed past threshold; surfacing Offline: %s", err)
+        # Volatile fields (battery, cleaning time/area) are zeroed with the
+        # status; the map, consumables and preferences survive.
+        return dataclasses.replace(
+            self._last_good_data,
+            status=OFFLINE_STATUS,
+            map_data=self._map_data,
+            consumables=dict(self._last_good_data.consumables),
+        )
+
+    async def async_refresh(self) -> None:
+        """Refresh now, including the properties even mid-clean.
+
+        Covers ``async_request_refresh`` too (HA debounces it into this
+        method), so entity commands and ``homeassistant.update_entity`` never
+        wait for the next property tick. Only scheduled ticks skip properties.
+        """
+        self._properties_due = True
+        await super().async_refresh()
+
+    async def async_disconnect(self) -> None:
+        """Disconnect from the cloud."""
+        await self._cloud.disconnect()
+        self._connected = False
+
+    # ------------------------------------------------------------------
+    # Map helpers used by the entities
+    # ------------------------------------------------------------------
 
     @property
     def pending_zone_update(self) -> dict[str, Any] | None:
@@ -541,9 +507,9 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
         """
         self._pending_zone_update = update
 
-    def reset_map_cache(self) -> None:
-        """Force the next fast tick to re-fetch map data."""
-        self._last_map_update = 0
+    def invalidate_map(self) -> None:
+        """Make the next refresh fetch the map even while the robot is idle."""
+        self._map_current = False
 
     def set_map_data(self, map_data: DreameMap) -> None:
         """Replace the cached map data (used by request_map for investigation)."""
@@ -553,13 +519,17 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
     def async_map_options_changed(self) -> None:
         """Repaint the map after a rotation/flip option changed.
 
-        Pushes the current data unchanged so the image entity re-reads
-        ``config_entry.options``. This replaces a config entry update
-        listener on purpose: HA 2026.12 turns "update listener plus
-        ``async_update_reload_and_abort``" (which the reauth flow uses) into
-        an error.
+        Notifies the listeners without touching the data or the schedule so
+        the image entity re-reads ``config_entry.options``. This replaces a
+        config entry update listener on purpose: HA 2026.12 turns "update
+        listener plus ``async_update_reload_and_abort``" (which the reauth
+        flow uses) into an error.
         """
-        self.async_set_updated_data(self.data)
+        self.async_update_listeners()
+
+    # ------------------------------------------------------------------
+    # Per-room cleanset
+    # ------------------------------------------------------------------
 
     def current_cleanset(self) -> str | dict[str, Any] | None:
         """Return the best-available stored ``cleanset`` (live frame, then rism).
@@ -675,59 +645,3 @@ class DreameCloudCoordinator(DataUpdateCoordinator[DreameCloudData]):
             await self._async_save_map_cache(self._map_data)
         await self.async_request_refresh()
         return updated
-
-    def _start_fast_map_poll(self) -> None:
-        """Start the fast map poll loop if not already running."""
-        if self._fast_map_unsub is not None:
-            return
-        self._fast_map_unsub = async_track_time_interval(
-            self.hass,
-            self._async_fast_map_tick,
-            timedelta(seconds=MAP_FAST_POLL_INTERVAL_CLEANING),
-            cancel_on_shutdown=True,
-        )
-
-    def _stop_fast_map_poll(self) -> None:
-        """Stop the fast map poll loop if running."""
-        if self._fast_map_unsub is None:
-            return
-        self._fast_map_unsub()
-        self._fast_map_unsub = None
-
-    async def _async_fast_map_tick(self, _now: datetime) -> None:
-        """Fetch the map and push fresh data to listeners."""
-        if self._device is None:
-            return
-        try:
-            async with asyncio.timeout(15):
-                new_map = await self.device.get_map()
-        except Exception as err:
-            _LOGGER.debug("Fast map poll fetch failed: %s", err)
-            return
-        self._map_data = new_map
-        self._last_map_update = time.monotonic()
-        await self._async_save_map_cache(new_map)
-        self.async_set_updated_data(
-            DreameCloudData(
-                status=self.data.status,
-                map_data=new_map,
-                consumables=self.data.consumables,
-                dnd_enabled=self.data.dnd_enabled,
-                volume=self.data.volume,
-                self_clean=self.data.self_clean,
-                auto_water_refilling=self.data.auto_water_refilling,
-                auto_mount_mop=self.data.auto_mount_mop,
-                intelligent_recognition=self.data.intelligent_recognition,
-                mop_wash_level=self.data.mop_wash_level,
-                mop_in_station=self.data.mop_in_station,
-                mop_pad_installed=self.data.mop_pad_installed,
-                customized_cleaning=self.data.customized_cleaning,
-                low_water_warning=self.data.low_water_warning,
-            )
-        )
-
-    async def async_disconnect(self) -> None:
-        """Disconnect from the cloud."""
-        self._stop_fast_map_poll()
-        await self._cloud.disconnect()
-        self._connected = False

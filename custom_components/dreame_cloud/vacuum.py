@@ -478,8 +478,8 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         # Cache the sent zone data so image.py uses it instead of
         # stale rism data until the cloud updates the saved map blob.
         self.coordinator.set_pending_zone_update(update)
-        # Force next refresh to re-fetch map data (bypass idle throttle)
-        self.coordinator.reset_map_cache()
+        # Re-fetch the map on the next refresh even though the robot is idle.
+        self.coordinator.invalidate_map()
         await self.coordinator.async_request_refresh()
 
     async def async_clean_zone(

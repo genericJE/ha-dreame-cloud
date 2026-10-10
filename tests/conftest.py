@@ -50,7 +50,8 @@ class MockCloud:
         self.port = _free_port()
         self.tokens = TokenStore()
         registry = DeviceRegistry()
-        registry.add(VacuumDevice(did="1234567890"))
+        self.device = VacuumDevice(did="1234567890")
+        registry.add(self.device)
         config = uvicorn.Config(
             create_app(registry, self.tokens), host="127.0.0.1", port=self.port, log_level="warning",
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,10 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+
+from dreame_mocker.const import DeviceState, Property
 
 from .conftest import MockCloud
 
@@ -218,3 +222,46 @@ async def test_reauth_flow(hass: HomeAssistant, mock_cloud: MockCloud, caplog: p
     assert entry.data["password"] == "new-pw"
     assert entry.state is ConfigEntryState.LOADED
     assert _our_problems(caplog) == []
+
+
+async def test_properties_keep_polling_while_cleaning(hass: HomeAssistant, mock_cloud: MockCloud) -> None:
+    """The fast map cadence during a clean must not starve the property poll.
+
+    Regression: the old separate map loop pushed with ``async_set_updated_data``
+    every 2 s, which rescheduled the 30 s property refresh forever, so state,
+    battery and cleaning time froze for the whole clean.
+    """
+    entry = await _setup(hass, mock_cloud.entry_data)
+    coordinator = entry.runtime_data
+    battery = _entity(hass, entry, "_battery")
+    state = _entity(hass, entry, "_state")
+
+    # Park the shared mock robot: an earlier test may have left its 60 s fake clean running.
+    await hass.services.async_call("vacuum", "stop", {"entity_id": _entity(hass, entry, "_vacuum")}, blocking=True)
+    mock_cloud.device.set_property(*Property.STATE, DeviceState.CHARGING)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(state).state == "Charging"
+    assert coordinator.update_interval == timedelta(seconds=30)
+
+    mock_cloud.device.set_property(*Property.STATE, DeviceState.SWEEPING)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(state).state == "Sweeping"
+    assert coordinator.update_interval == timedelta(seconds=2)
+
+    # One property interval worth of fast ticks picks up the new battery level.
+    # (A few extra ticks: the coordinator jitters its timer by up to 0.5 s.)
+    mock_cloud.device.set_property(*Property.BATTERY_LEVEL, 42)
+    now = dt_util.utcnow()
+    for i in range(1, 20):
+        async_fire_time_changed(hass, now + timedelta(seconds=2 * i))
+        await hass.async_block_till_done(wait_background_tasks=True)  # scheduled refreshes
+    assert hass.states.get(battery).state == "42"
+
+    # Leaving the cleaning states drops back to the idle cadence.
+    mock_cloud.device.set_property(*Property.STATE, DeviceState.CHARGING)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(state).state == "Charging"
+    assert coordinator.update_interval == timedelta(seconds=30)
