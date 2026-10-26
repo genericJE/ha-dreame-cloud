@@ -18,6 +18,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
+from custom_components.dreame_cloud.const import RETURNING_REMOVE_MOP
 from dreame_mocker.const import DeviceState, Property
 
 from .conftest import MockCloud
@@ -265,3 +266,26 @@ async def test_properties_keep_polling_while_cleaning(hass: HomeAssistant, mock_
     await hass.async_block_till_done()
     assert hass.states.get(state).state == "Charging"
     assert coordinator.update_interval == timedelta(seconds=30)
+
+
+async def test_mop_handling_states_and_error_are_named(hass: HomeAssistant, mock_cloud: MockCloud) -> None:
+    """States 17/18 and error 68 (seen on a real X50) must not surface as raw numbers."""
+    entry = await _setup(hass, mock_cloud.entry_data)
+    coordinator = entry.runtime_data
+    vacuum = _entity(hass, entry, "_vacuum")
+    state = _entity(hass, entry, "_state")
+
+    await hass.services.async_call("vacuum", "stop", {"entity_id": vacuum}, blocking=True)
+    mock_cloud.device.set_property(*Property.STATE, RETURNING_REMOVE_MOP)
+    mock_cloud.device.set_property(*Property.ERROR, 68)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(state).state == "Returning to Remove Mop"
+    assert hass.states.get(vacuum).state == "returning"
+    assert hass.states.get(vacuum).attributes["error"] == "Remove mop"
+
+    mock_cloud.device.set_property(*Property.STATE, DeviceState.CHARGING)
+    mock_cloud.device.set_property(*Property.ERROR, 0)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(vacuum).attributes["error"] == "OK"

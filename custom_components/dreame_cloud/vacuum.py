@@ -28,8 +28,11 @@ from dreame_mocker.const import DeviceState
 
 from . import DreameCloudConfigEntry
 from .const import (
+    ERROR_CODES,
     FAN_SPEED_TO_SUCTION,
     FAN_SPEEDS,
+    RETURNING_INSTALL_MOP,
+    RETURNING_REMOVE_MOP,
     SUCTION_TO_FAN_SPEED,
     default_room_name,
 )
@@ -57,6 +60,8 @@ STATE_MAP: dict[int, VacuumActivity] = {
     DeviceState.MOP_WASHING: VacuumActivity.DOCKED,
     DeviceState.MOP_WASHING_PAUSED: VacuumActivity.PAUSED,
     DeviceState.EMPTYING: VacuumActivity.DOCKED,
+    RETURNING_INSTALL_MOP: VacuumActivity.RETURNING,
+    RETURNING_REMOVE_MOP: VacuumActivity.RETURNING,
 }
 
 
@@ -573,6 +578,10 @@ class DreameCloudVacuum(DreameCloudEntity, StateVacuumEntity):
         """Return extra state attributes."""
         attrs: dict[str, Any] = {
             "error_code": self.coordinator.data.status.error,
+            "error": ERROR_CODES.get(
+                self.coordinator.data.status.error,
+                f"Error {self.coordinator.data.status.error}",
+            ),
         }
         if self.coordinator.data.map_data:
             rooms = self.coordinator.data.map_data.rooms

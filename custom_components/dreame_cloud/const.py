@@ -98,6 +98,25 @@ INT_TO_MOP_WASH_LEVEL: dict[int, str] = {
     v: k for k, v in MOP_WASH_LEVEL_TO_INT.items()
 }
 
+# Firmware states observed on the X50 Ultra Complete (2026-10-26, both an
+# official-app and an HA-launched room clean) that dreame_mocker's STATES
+# table does not cover. Names follow Tasshack/dreame-vacuum's
+# DreameVacuumState: the robot drives back to the dock mid-task to drop the
+# mop pads (18) before a vacuum-only pass, or to pick them up again (17).
+RETURNING_INSTALL_MOP = 17
+RETURNING_REMOVE_MOP = 18
+EXTRA_STATES: dict[int, str] = {
+    RETURNING_INSTALL_MOP: "Returning to Install Mop",
+    RETURNING_REMOVE_MOP: "Returning to Remove Mop",
+}
+
+# Error codes (siid 2 piid 2). 68 was seen for ~45 s right after an
+# HA-launched segment clean started from Drying; Tasshack names it REMOVE_MOP.
+ERROR_CODES: dict[int, str] = {
+    0: "OK",
+    68: "Remove mop",
+}
+
 # Onboard clean-water low-level warning (siid 4 piid 41). The firmware raises
 # this when the robot's small onboard tank (fed from the dock) runs low; at
 # NO_WATER_FOR_CLEAN it silently drops to vacuum-only ("switched to Vacuuming

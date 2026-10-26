@@ -46,6 +46,7 @@ from .cleanset import (
 from .const import (
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
+    EXTRA_STATES,
     LOW_WATER_WARNING,
     MAP_FAST_POLL_INTERVAL_CLEANING,
     OFFLINE_THRESHOLD_SECONDS,
@@ -70,6 +71,8 @@ OFFLINE_STATUS = DeviceStatus(
     suction_level=0, water_volume=0, cleaning_mode=0,
     cleaning_time=0, cleaning_area=0,
 )
+
+STATE_NAMES: dict[int, str] = {**STATES, **EXTRA_STATES}
 
 POLLED_PROPERTIES: list[Any] = [
     Property.STATE,
@@ -166,7 +169,7 @@ def _parse_properties(props: list[dict[str, Any]]) -> DreameCloudData:
     return DreameCloudData(
         status=DeviceStatus(
             state=state,
-            state_name=STATES.get(state, str(state)),
+            state_name=STATE_NAMES.get(state, str(state)),
             battery=_as_int(values, Property.BATTERY_LEVEL, 0),
             error=_as_int(values, Property.ERROR, 0),
             suction_level=_as_int(values, Property.SUCTION_LEVEL, 0),
