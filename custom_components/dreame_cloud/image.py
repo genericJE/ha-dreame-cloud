@@ -15,7 +15,7 @@ from typing import Any, cast
 
 import numpy as np
 from homeassistant.components.image import ImageEntity
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from PIL import Image, ImageDraw
 
@@ -77,6 +77,16 @@ class DreameCloudMapImage(DreameCloudEntity, ImageEntity):
         """
         await super().async_added_to_hass()
         await self._async_render()
+
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Opt in to in-place entity_id changes (HA 2026.11+).
+
+        Nothing here is keyed on the entity_id. Without this hook HA removes
+        and re-adds the entity on a rename, a fallback it drops in 2027.11.
+        The hook does not exist on the locked core yet, hence the ignore.
+        """
+        super().async_entity_id_changed(old_entity_id)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

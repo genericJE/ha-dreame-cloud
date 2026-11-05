@@ -265,3 +265,28 @@ async def test_properties_keep_polling_while_cleaning(hass: HomeAssistant, mock_
     await hass.async_block_till_done()
     assert hass.states.get(state).state == "Charging"
     assert coordinator.update_interval == timedelta(seconds=30)
+
+
+async def test_renaming_the_floor_plan_keeps_it_served(
+    hass: HomeAssistant, mock_cloud: MockCloud, hass_client: Any, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An entity_id change must leave the image entity working under the new id.
+
+    HA 2026.11 changes the id in place for entities that implement
+    ``async_entity_id_changed``; older cores remove the entity and add it again.
+    """
+    entry = await _setup(hass, mock_cloud.entry_data)
+    old = _entity(hass, entry, "_floor_plan")
+    new = "image.renamed_floor_plan"
+
+    er.async_get(hass).async_update_entity(old, new_entity_id=new)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(old) is None
+    state = hass.states.get(new)
+    assert state is not None
+    assert state.state not in ("unavailable", "unknown")
+    resp = await (await hass_client()).get(f"/api/image_proxy/{new}")
+    assert resp.status == HTTPStatus.OK
+    assert (await resp.read())[:4] == b"\x89PNG"
+    assert _our_problems(caplog) == []
