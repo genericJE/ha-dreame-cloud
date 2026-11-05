@@ -50,6 +50,14 @@ The coordinator persists map data and device info to `.storage/dreame_cloud_map_
 - A cached token the cloud no longer accepts (revoked, or forgotten by the server) is handled inside dreame-mocker v0.1.5: the first 401 triggers one fresh password login and the request is retried. Only a persistent 401 reaches the coordinator, as an `AuthenticationError`, which starts the reauth flow.
 - dreame-mocker lets `httpx` transport errors (DNS failure, connection refused) escape unwrapped, so every `except DreameError` around a cloud call also catches `httpx.HTTPError`. Without that the config flow shows "unknown error" and the coordinator logs an "Unexpected error" traceback whenever the internet is down.
 
+## HA 2026.11 notes
+
+- **httpx is aliased to httpx2.** `homeassistant/__init__.py` calls `httpx2.alias_httpx()`, so inside HA every `import httpx` (ours and dreame-mocker's) resolves to httpx2. dreame-mocker 0.1.6 passes its whole suite under the alias (`create_ssl_context`, `AsyncClient(verify=...)`, the exception classes and the test transports all exist in httpx2 2.14).
+- **In-place entity_id changes.** A custom entity class that defines `async_added_to_hass` / `async_will_remove_from_hass` is removed and re-added on a rename unless that class or a subclass also defines `async_entity_id_changed`; the fallback goes away in 2027.11. `DreameCloudMapImage` is the only class with such a hook and opts in. Core's own check is `homeassistant.helpers.entity._entity_class_requires_readd(cls)`.
+- **Entity names in the card** come from `entityName()` in `card/src/helpers.js`, which calls `hass.formatEntityName(stateObj, [{type: "device"}, {type: "entity"}])` (HA 2026.4+) and falls back to `friendly_name`, which is planned for deprecation.
+- **The test plugin lags.** As of 2026-11-05 the newest `pytest-homeassistant-custom-component` pins HA 2026.10.4 and fails to import against a 2026.11 core, so the e2e suite cannot run on 2026.11 yet and `async_entity_id_changed` carries a pyright ignore (the locked core has no such method). Drop the ignore when the lock moves to 2026.11.
+- **The card build needs Node 22 to 24 here.** Under Homebrew's Node 26.12 `npm run build` aborts (exit 134) without a message.
+
 ## Map orientation options
 
 Rotation (`select`) and flip (`switch`) entities write `config_entry.options` and then call `coordinator.async_map_options_changed()`, which pushes the current data so the image entity re-reads the options and repaints. This replaces a config entry update listener on purpose: from HA 2026.12 an update listener combined with `async_update_reload_and_abort` (used by the reauth flow) is an error. The image entity also renders once in `async_added_to_hass`, so a restart shows the cached map immediately instead of a blank image until the first poll.
