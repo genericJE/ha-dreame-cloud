@@ -1,6 +1,7 @@
 {
   "domain": "dreame_cloud",
   "name": "Dreame Cloud Vacuum",
+  "categories": ["appliances_cleaning.cleaning"],
   "codeowners": ["@genericJE"],
   "config_flow": true,
   "dependencies": ["http"],
