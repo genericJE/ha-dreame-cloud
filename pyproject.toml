@@ -7,7 +7,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.14.2"
 dependencies = [
     "homeassistant>=2026.5.0",
-    "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git@v0.1.5",
+    "dreame-mocker @ git+https://github.com/genericJE/dreame-mocker.git@v0.1.6",
     "Pillow>=10.0.0",
     "numpy>=1.26.0",
 ]
@@ -27,7 +27,7 @@ dev = [
     "pyright>=1.1.400",
     "ruff>=0.11",
     "pytest-homeassistant-custom-component",
-    "dreame-mocker[server] @ git+https://github.com/genericJE/dreame-mocker.git@v0.1.5",
+    "dreame-mocker[server] @ git+https://github.com/genericJE/dreame-mocker.git@v0.1.6",
 ]
 
 [tool.pytest.ini_options]

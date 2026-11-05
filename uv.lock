@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14.2"
 
 [[package]]
@@ -867,8 +867,8 @@ wheels = [
 
 [[package]]
 name = "dreame-mocker"
-version = "0.1.5"
-source = { git = "https://github.com/genericJE/dreame-mocker.git?rev=v0.1.5#43594a0100d471f2455be24f04f3a5c05d963688" }
+version = "0.1.6"
+source = { git = "https://github.com/genericJE/dreame-mocker.git?rev=v0.1.6#e453420e25d7edc3d38e1478dc1c1caa8f62f624" }
 dependencies = [
     { name = "httpx" },
     { name = "pycryptodome" },
@@ -1096,7 +1096,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dreame-mocker", git = "https://github.com/genericJE/dreame-mocker.git?rev=v0.1.5" },
+    { name = "dreame-mocker", git = "https://github.com/genericJE/dreame-mocker.git?rev=v0.1.6" },
     { name = "homeassistant", specifier = ">=2026.5.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "pillow", specifier = ">=10.0.0" },
@@ -1104,7 +1104,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "dreame-mocker", extras = ["server"], git = "https://github.com/genericJE/dreame-mocker.git?rev=v0.1.5" },
+    { name = "dreame-mocker", extras = ["server"], git = "https://github.com/genericJE/dreame-mocker.git?rev=v0.1.6" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest-homeassistant-custom-component" },
     { name = "ruff", specifier = ">=0.11" },
