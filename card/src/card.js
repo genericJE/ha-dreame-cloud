@@ -1,4 +1,4 @@
-import { fireEvent, formatDuration, batteryIcon } from "./helpers.js";
+import { entityName, fireEvent, formatDuration, batteryIcon } from "./helpers.js";
 import {
   SUCTION_MAP, WATER_MAP, CLEANING_MODE_MAP,
   SUCTION_OPTIONS, WATER_OPTIONS, CLEANING_MODE_OPTIONS,
@@ -281,7 +281,7 @@ class DreameVacuumMapCard extends HTMLElement {
       return;
     }
 
-    const name = vacuum.attributes.friendly_name || "Vacuum";
+    const name = entityName(this._hass, vacuum, "Vacuum");
     const activity = vacuum.state;
     const batteryEntity = this._getState(this._entities.battery);
     const battery = batteryEntity ? parseInt(batteryEntity.state, 10) : (vacuum.attributes.battery_level ?? 0);

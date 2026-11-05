@@ -9,6 +9,15 @@
     node.dispatchEvent(event);
   }
   __name(fireEvent, "fireEvent");
+  function entityName(hass, stateObj, fallback) {
+    if (!stateObj) return fallback;
+    if (typeof hass?.formatEntityName === "function") {
+      const name = hass.formatEntityName(stateObj, [{ type: "device" }, { type: "entity" }], { separator: " " });
+      if (name) return name;
+    }
+    return stateObj.attributes.friendly_name || fallback;
+  }
+  __name(entityName, "entityName");
   function formatDuration(seconds) {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -973,7 +982,7 @@
       if (!this._hass) return [];
       return Object.keys(this._hass.states).filter((id) => id.startsWith("vacuum.")).map((id) => ({
         id,
-        name: this._hass.states[id].attributes.friendly_name || id,
+        name: entityName(this._hass, this._hass.states[id], id),
         isDreame: id.includes("dreame")
       })).sort((a, b) => {
         if (a.isDreame !== b.isDreame) return a.isDreame ? -1 : 1;
@@ -984,7 +993,7 @@
       if (!this._hass) return [];
       return Object.keys(this._hass.states).filter((id) => id.startsWith("image.") && id.includes("floor_plan")).map((id) => ({
         id,
-        name: this._hass.states[id].attributes.friendly_name || id
+        name: entityName(this._hass, this._hass.states[id], id)
       })).sort((a, b) => a.name.localeCompare(b.name));
     }
     _getCameraEntityId() {
@@ -1429,7 +1438,7 @@
         header.innerHTML = `<div class="header-left"><span class="device-name">Unavailable</span></div>`;
         return;
       }
-      const name = vacuum.attributes.friendly_name || "Vacuum";
+      const name = entityName(this._hass, vacuum, "Vacuum");
       const activity = vacuum.state;
       const batteryEntity = this._getState(this._entities.battery);
       const battery = batteryEntity ? parseInt(batteryEntity.state, 10) : vacuum.attributes.battery_level ?? 0;

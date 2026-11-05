@@ -1,4 +1,4 @@
-import { fireEvent } from "./helpers.js";
+import { entityName, fireEvent } from "./helpers.js";
 
 export class DreameVacuumMapCardEditor extends HTMLElement {
   constructor() {
@@ -28,7 +28,7 @@ export class DreameVacuumMapCardEditor extends HTMLElement {
       .filter((id) => id.startsWith("vacuum."))
       .map((id) => ({
         id,
-        name: this._hass.states[id].attributes.friendly_name || id,
+        name: entityName(this._hass, this._hass.states[id], id),
         isDreame: id.includes("dreame"),
       }))
       .sort((a, b) => {
@@ -43,7 +43,7 @@ export class DreameVacuumMapCardEditor extends HTMLElement {
       .filter((id) => id.startsWith("image.") && id.includes("floor_plan"))
       .map((id) => ({
         id,
-        name: this._hass.states[id].attributes.friendly_name || id,
+        name: entityName(this._hass, this._hass.states[id], id),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }

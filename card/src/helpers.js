@@ -4,6 +4,19 @@ export function fireEvent(node, type, detail) {
   node.dispatchEvent(event);
 }
 
+// Display name of an entity: device name followed by entity name, the way
+// Home Assistant's own cards compose it. `hass.formatEntityName` exists since
+// HA 2026.4; `friendly_name` is the fallback for older cores and is planned
+// for deprecation.
+export function entityName(hass, stateObj, fallback) {
+  if (!stateObj) return fallback;
+  if (typeof hass?.formatEntityName === "function") {
+    const name = hass.formatEntityName(stateObj, [{ type: "device" }, { type: "entity" }], { separator: " " });
+    if (name) return name;
+  }
+  return stateObj.attributes.friendly_name || fallback;
+}
+
 export function formatDuration(seconds) {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
