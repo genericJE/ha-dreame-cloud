@@ -14,6 +14,14 @@ import uvicorn
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 
+# pytest-aiohttp and pytest-homeassistant-custom-component both provide an
+# ``aiohttp_client`` fixture, and the plugin pytest happens to load last wins.
+# That order follows the site-packages listing, so it differs between machines.
+# Only HA's version keeps the router unfrozen, which websocket_api needs when
+# its view is registered after an HTTP client has already started the server.
+# A fixture imported into conftest outranks both plugins.
+from pytest_homeassistant_custom_component.plugins import aiohttp_client  # noqa: F401
+
 from dreame_mocker.auth import TokenStore
 from dreame_mocker.server import create_app
 from dreame_mocker.state import DeviceRegistry, VacuumDevice
